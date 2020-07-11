@@ -1,0 +1,73 @@
+.aws-sam
+.venv
+.vscode
+*.packaged.*
+swagger-gen.json
+documentation/build
+build
+build
+openapi-generator
+*.local.*
+*.local
+.pytest-cache
+local-dynamodb
+
+sdk/output/*
+sdk/spec.json
+.DS_Store
+swagger-editor/spec.json
+__pycache__
+/__pycache__
+.mypy_cache
+.env
+.coverage
+*.pyc
+coverage
+Pipfile.lock
+node_modules
+.git
+.idea
+Pipfile
+Pipfile.lock
+test-reports
+.python-version
+config.*
+*.xlsx
+local-step-function
+step-function-local.log
+*.zip
+stepfunctions.yml
+
+!app/lib/dynamodb/config.py
+
+# Ignore downloaded files
+Scorecards/
+
+# Manifests are inputs to Cloudformation. They contain deploy specific things (like payer accounts)
+*Manifest.yaml
+cloudformation/*Transformed*.yaml
+config-files/*
+
+# Frontend ignore
+# dependencies
+/node_modules
+/.pnp
+.pnp.js
+frontend.zip
+
+# testing
+/coverage
+
+# production
+/build
+
+# misc
+.DS_Store
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*

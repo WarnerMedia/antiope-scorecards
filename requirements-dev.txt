@@ -1,0 +1,12 @@
+# python modules required for local developement and required by the CI/CD pipeline for building and testing.
+assertpy
+cfn-lint
+openpyxl
+pylint
+pylint-quotes
+pytest
+pytest-cov
+pytest-dotenv
+pytest-pythonpath
+warrant
+yq
