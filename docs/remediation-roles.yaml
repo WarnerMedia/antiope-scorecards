@@ -1,0 +1,33 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: IAM role for the security group ingress worker
+
+Parameters:
+  TrustedAccountNumber:
+    Type: String
+
+Resources:
+  RemediateIngressRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: remediation-role
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              AWS: !Sub arn:aws:iam::${TrustedAccountNumber}:root
+            Action: sts:AssumeRole
+      Description: Role with permissions to remediate security group ingress within Remediation framework.
+      Policies:
+        - PolicyName: ModifySecurityGroups
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: ec2ModifyIngressRules
+                Effect: Allow
+                Action:
+                  - ec2:DescribeSecurityGroups
+                  - ec2:AuthorizeSecurityGroupIngress
+                  - ec2:RevokeSecurityGroupIngress
+                Resource: '*'

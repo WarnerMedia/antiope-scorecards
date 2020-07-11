@@ -1,0 +1,953 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: Step function and associated lambda functions for Antiope Scorecards
+
+
+Parameters:
+  Stage:
+    Type: String
+  UsersTable:
+    Type: String
+  ConfigTable:
+    Type: String
+  AccountsTable:
+    Type: String
+  RequirementsTable:
+    Type: String
+  NCRTable:
+    Type: String
+  ExclusionsResourcesTable:
+    Type: String
+  ScoresTable:
+    Type: String
+  AccountScoresTable:
+    Type: String
+  ScansTable:
+    Type: String
+  AuditTable:
+    Type: String
+  ResourcePrefix:
+    Type: String
+  CloudSploitScanningFunctionArn:
+    Type: String
+  StateLambdaFunctionsMemorySize:
+    Type: Number
+    AllowedValues: [128, 192, 256, 320, 384, 448, 512, 576, 640, 704, 768, 832, 896, 960, 1024, 1088, 1152, 1216, 1280, 1344, 1408, 1472, 1536, 1600, 1664, 1728, 1792, 1856, 1920, 1984, 2048, 2112, 2176, 2240, 2304, 2368, 2432, 2496, 2560, 2624, 2688, 2752, 2816, 2880, 2944, 3008]
+  StateLambdaFunctionsTimeout:
+    Type: Number
+    MinValue: 3
+    MaxValue: 900
+  AccountImportBucket:
+    Type: String
+    Description: The bucket to import accounts from
+  AccountImportKey:
+    Type: String
+    Description: The s3 object key to import accounts from
+  UserImportBucket:
+    Type: String
+    Description: The bucket to import users from
+  UserImportKey:
+    Type: String
+    Description: The s3 object key to import users from
+  RequirementImportBucket:
+    Type: String
+    Description: The bucket to import requirements from
+  RequirementImportKey:
+    Type: String
+    Description: The s3 object key to import requirements from
+  CloudSploitPrefix:
+    Type: String
+    Description: Used as part of s3 key for CloudSploit results objects
+  CloudSploitResultBucket:
+    Type: String
+    Description: The bucket to import CloudSploit results from
+  ScorecardBucket:
+    Type: String
+  ScorecardPrefix:
+    Type: String
+
+
+Globals:
+  Function:
+    Runtime: python3.8
+    MemorySize: !Ref StateLambdaFunctionsMemorySize
+    Timeout: !Ref StateLambdaFunctionsTimeout
+    Environment:
+      Variables:
+        STAGE: !Ref Stage
+        USERS_TABLE: !Ref UsersTable
+        CONFIG_TABLE: !Ref ConfigTable
+        ACCOUNTS_TABLE: !Ref AccountsTable
+        REQUIREMENTS_TABLE: !Ref RequirementsTable
+        NCR_TABLE: !Ref NCRTable
+        EXCLUSIONS_TABLE: !Ref ExclusionsResourcesTable
+        SCORES_TABLE: !Ref ScoresTable
+        ACCOUNT_SCORES_TABLE: !Ref AccountScoresTable
+        SCANS_TABLE: !Ref ScansTable
+        AUDIT_TABLE: !Ref AuditTable
+        ACCOUNT_BUCKET: !Ref AccountImportBucket
+        ACCOUNT_FILE_PATH: !Ref AccountImportKey
+        USER_BUCKET: !Ref UserImportBucket
+        USER_FILE_PATH: !Ref UserImportKey
+        REQUIREMENTS_BUCKET: !Ref RequirementImportBucket
+        REQUIREMENTS_FILE_PATH: !Ref RequirementImportKey
+        CLOUDSPLOIT_PREFIX: !Ref CloudSploitPrefix
+        CLOUDSPLOIT_RESULT_BUCKET: !Ref CloudSploitResultBucket
+        SCORECARD_BUCKET: !Ref ScorecardBucket
+        SCORECARD_PREFIX: !Ref ScorecardPrefix
+
+
+Resources:
+  OpenScan:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub ${ResourcePrefix}-${Stage}-states-OpenScan
+      Handler: states.scan.open_handler
+      CodeUri: ../build
+      Role: !GetAtt ScanFunctionRole.Arn
+
+  CloseScan:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub ${ResourcePrefix}-${Stage}-states-CloseScan
+      Handler: states.scan.close_handler
+      CodeUri: ../build
+      Role: !GetAtt ScanFunctionRole.Arn
+
+  ScanError:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub ${ResourcePrefix}-${Stage}-states-ScanError
+      Handler: states.scan.error_handler
+      CodeUri: ../build
+      Role: !GetAtt ScanFunctionRole.Arn
+
+  GenerateSpreadsheets:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub ${ResourcePrefix}-${Stage}-states-GenerateSpreadsheets
+      Handler: states.genspreadsheets.gen_spreadsheets_handler
+      CodeUri: ../build
+      Role: !GetAtt ScanFunctionRole.Arn
+
+  GenerateSpreadsheetsError:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub ${ResourcePrefix}-${Stage}-states-GenerateSpreadsheetsError
+      Handler: states.genspreadsheets.gen_spreadsheets_error_handler
+      CodeUri: ../build
+      Role: !GetAtt ScanFunctionRole.Arn
+
+  ScoreCalculations:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub ${ResourcePrefix}-${Stage}-states-ScoreCalculation
+      Handler: states.score.score_calc_handler
+      CodeUri: ../build
+      Role: !GetAtt ScanFunctionRole.Arn
+
+  Exclude:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub ${ResourcePrefix}-${Stage}-states-Exclude
+      Handler: states.exclude.exclude_handler
+      CodeUri: ../build
+      Role: !GetAtt ScanFunctionRole.Arn
+
+  CloudSploitSetup:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub ${ResourcePrefix}-${Stage}-states-CloudSploitSetup
+      Handler: states.cloudsploit.cloudsploit_setup
+      CodeUri: ../build
+      Role: !GetAtt ScanFunctionRole.Arn
+
+  CloudSploitPopulate:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub ${ResourcePrefix}-${Stage}-states-CloudSploitPopulate
+      Handler: states.cloudsploit.cloudsploit_populate
+      CodeUri: ../build
+      Role: !GetAtt ScanFunctionRole.Arn
+
+  CloudSploitError:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub ${ResourcePrefix}-${Stage}-states-CloudSploitError
+      Handler: states.cloudsploit.cloudsploit_error
+      CodeUri: ../build
+      Role: !GetAtt ScanFunctionRole.Arn
+
+  S3Import:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub ${ResourcePrefix}-${Stage}-states-S3Import
+      Handler: states.s3importer.s3import_handler
+      CodeUri: ../build
+      Role: !GetAtt ScanFunctionRole.Arn
+
+  S3ImportError:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub ${ResourcePrefix}-${Stage}-states-S3ImportError
+      Handler: states.s3importer_error.s3import_error_handler
+      CodeUri: ../build
+      Role: !GetAtt ScanFunctionRole.Arn
+
+  Load:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub ${ResourcePrefix}-${Stage}-states-Load
+      Handler: states.load.load_handler
+      CodeUri: ../build
+      Role: !GetAtt ScanFunctionRole.Arn
+
+  SetupUserSpreadsheets:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub ${ResourcePrefix}-${Stage}-states-SetupUserSpreadsheets
+      Handler: states.genspreadsheets.setup_user_spreadsheets_handler
+      CodeUri: ../build
+      Role: !GetAtt ScanFunctionRole.Arn
+
+  Dashboard:
+    Type: "AWS::CloudWatch::Dashboard"
+    Properties:
+      DashboardName: !Sub ${ResourcePrefix}-${Stage}-stepfunction
+      DashboardBody: !Sub
+      - |-
+        {
+          "widgets": [
+            {
+              "type": "metric",
+              "x": 0,
+              "y": 0,
+              "width": 24,
+              "height": 6,
+              "properties": {
+                "view": "singleValue",
+                "metrics": [
+                  [ "AWS/Lambda", "Invocations", "FunctionName", "${OpenScan}", { "stat": "Sum", "period": 604800, "label": "OpenScan"} ],
+                  [ "...", "${CloudSploitScanningFunctionName}", { "stat": "Sum", "period": 604800, "label": "${CloudSploitScanningFunctionName}" } ],
+                  [ "...", "${CloseScan}", { "stat": "Sum", "period": 604800, "label": "CloseScan" } ],
+                  [ "...", "${ScanError}", { "stat": "Sum", "period": 604800, "label": "ScanError" } ],
+                  [ "...", "${GenerateSpreadsheets}", { "stat": "Sum", "period": 604800, "label": "GenerateSpreadsheets" } ],
+                  [ "...", "${GenerateSpreadsheetsError}", { "stat": "Sum", "period": 604800, "label": "GenerateSpreadsheetsError" } ],
+                  [ "...", "${ScoreCalculations}", { "stat": "Sum", "period": 604800, "label": "ScoreCalculations" } ],
+                  [ "...", "${Exclude}", { "stat": "Sum", "period": 604800, "label": "Exclude" } ],
+                  [ "...", "${CloudSploitSetup}", { "stat": "Sum", "period": 604800, "label": "CloudSploitSetup" } ],
+                  [ "...", "${CloudSploitPopulate}", { "stat": "Sum", "period": 604800, "label": "CloudSploitPopulate" } ],
+                  [ "...", "${CloudSploitError}", { "stat": "Sum", "period": 604800, "label": "CloudSploitError" } ],
+                  [ "...", "${S3Import}", { "stat": "Sum", "period": 604800, "label": "S3Import" } ],
+                  [ "...", "${S3ImportError}", { "stat": "Sum", "period": 604800, "label": "S3ImportError" } ],
+                  [ "...", "${Load}", { "stat": "Sum", "period": 604800, "label": "Load" } ],
+                  [ "...", "${SetupUserSpreadsheets}", { "stat": "Sum", "period": 604800, "label": "SetupUserSpreadsheets" } ]
+                ],
+                "region": "${AWS::Region}",
+                "title": "Lambda Invocation",
+                "period": 300
+              }
+            },
+            {
+              "type": "metric",
+              "x": 0,
+              "y": 6,
+              "width": 24,
+              "height": 6,
+              "properties": {
+                "view": "singleValue",
+                "metrics": [
+                  [ "AWS/Lambda", "Errors", "FunctionName", "${OpenScan}", { "stat": "Sum", "period": 604800, "label": "OpenScan"} ],
+                  [ "...", "${CloudSploitScanningFunctionName}", { "stat": "Sum", "period": 604800, "label": "${CloudSploitScanningFunctionName}" } ],
+                  [ "...", "${CloseScan}", { "stat": "Sum", "period": 604800, "label": "CloseScan" } ],
+                  [ "...", "${ScanError}", { "stat": "Sum", "period": 604800, "label": "ScanError" } ],
+                  [ "...", "${GenerateSpreadsheets}", { "stat": "Sum", "period": 604800, "label": "GenerateSpreadsheets" } ],
+                  [ "...", "${GenerateSpreadsheetsError}", { "stat": "Sum", "period": 604800, "label": "GenerateSpreadsheetsError" } ],
+                  [ "...", "${ScoreCalculations}", { "stat": "Sum", "period": 604800, "label": "ScoreCalculations" } ],
+                  [ "...", "${Exclude}", { "stat": "Sum", "period": 604800, "label": "Exclude" } ],
+                  [ "...", "${CloudSploitSetup}", { "stat": "Sum", "period": 604800, "label": "CloudSploitSetup" } ],
+                  [ "...", "${CloudSploitPopulate}", { "stat": "Sum", "period": 604800, "label": "CloudSploitPopulate" } ],
+                  [ "...", "${CloudSploitError}", { "stat": "Sum", "period": 604800, "label": "CloudSploitError" } ],
+                  [ "...", "${S3Import}", { "stat": "Sum", "period": 604800, "label": "S3Import" } ],
+                  [ "...", "${S3ImportError}", { "stat": "Sum", "period": 604800, "label": "S3ImportError" } ],
+                  [ "...", "${Load}", { "stat": "Sum", "period": 604800, "label": "Load" } ],
+                  [ "...", "${SetupUserSpreadsheets}", { "stat": "Sum", "period": 604800, "label": "SetupUserSpreadsheets" } ]
+                ],
+                "region": "${AWS::Region}",
+                "title": "Lambda Errors",
+                "period": 300
+              }
+            },
+            {
+              "type": "metric",
+              "x": 0,
+              "y": 12,
+              "width": 9,
+              "height": 6,
+              "properties": {
+                "view": "singleValue",
+                "metrics": [
+                  [ "AWS/States", "ExecutionsStarted", "StateMachineArn", "${ScoreCardGenerator}", { "stat": "Sum", "period": 604800, "label": "Started - Main" } ],
+                  [ ".", "ExecutionsSucceeded", ".", ".", { "stat": "Sum", "period": 604800, "label": "Succeeded - Main" } ],
+                  [ ".", "ExecutionsFailed", ".", ".", { "stat": "Sum", "period": 604800, "label": "Failed - Main" } ],
+                  [ "AWS/States", "ExecutionsStarted", "StateMachineArn", "${CloudsploitIterator}", { "stat": "Sum", "period": 604800, "label": "Started - CS iter" } ],
+                  [ ".", "ExecutionsSucceeded", ".", ".", { "stat": "Sum", "period": 604800, "label": "Succeeded - CS iter" } ],
+                  [ ".", "ExecutionsFailed", ".", ".", { "stat": "Sum", "period": 604800, "label": "Failed - CS iter" } ]
+                ],
+                "region": "${AWS::Region}",
+                "title": "StateMachines",
+                "period": 300
+              }
+            },
+            {
+              "type": "metric",
+              "x": 21,
+              "y": 18,
+              "width": 3,
+              "height": 3,
+              "properties": {
+                "view": "singleValue",
+                "title": "Recent Error Queue count",
+                "metrics": [
+                  [ "AWS/SQS", "NumberOfMessagesSent", "QueueName", "${SqsErrorQueue.QueueName}", { "stat": "Sum", "period": 86400, "label": "New errors, last day"} ]
+                ],
+                "region": "${AWS::Region}",
+                "period": 300
+              }
+            },
+            {
+              "type": "metric",
+              "x": 0,
+              "y": 18,
+              "width": 21,
+              "height": 3,
+              "properties": {
+                "view": "timeSeries",
+                "stacked": false,
+                "metrics": [
+                  [ "AWS/DynamoDB", "WriteThrottleEvents", "TableName", "${UsersTable}", { "stat": "Sum", "period": 300 } ],
+                  [ "AWS/DynamoDB", "WriteThrottleEvents", "TableName", "${ConfigTable}", { "stat": "Sum", "period": 300 } ],
+                  [ "AWS/DynamoDB", "WriteThrottleEvents", "TableName", "${AccountsTable}", { "stat": "Sum", "period": 300 } ],
+                  [ "AWS/DynamoDB", "WriteThrottleEvents", "TableName", "${RequirementsTable}", { "stat": "Sum", "period": 300 } ],
+                  [ "AWS/DynamoDB", "WriteThrottleEvents", "TableName", "${NCRTable}", { "stat": "Sum", "period": 300 } ],
+                  [ "AWS/DynamoDB", "WriteThrottleEvents", "TableName", "${ExclusionsResourcesTable}", { "stat": "Sum", "period": 300 } ],
+                  [ "AWS/DynamoDB", "WriteThrottleEvents", "TableName", "${ScoresTable}", { "stat": "Sum", "period": 300 } ],
+                  [ "AWS/DynamoDB", "WriteThrottleEvents", "TableName", "${AccountScoresTable}", { "stat": "Sum", "period": 300 } ],
+                  [ "AWS/DynamoDB", "WriteThrottleEvents", "TableName", "${ScansTable}", { "stat": "Sum", "period": 300 } ],
+                  [ "AWS/DynamoDB", "WriteThrottleEvents", "TableName", "${AuditTable}", { "stat": "Sum", "period": 300 } ]
+                ],
+                "region": "${AWS::Region}",
+                "title": "DDB Write Throttling"
+              }
+            },
+            {
+              "type": "metric",
+              "x": 9,
+              "y": 12,
+              "width": 9,
+              "height": 6,
+              "properties": {
+                "view": "timeSeries",
+                "stacked": false,
+                "metrics": [
+                  [ "AWS/States", "ExecutionTime", "StateMachineArn", "${ScoreCardGenerator}", { "stat": "Sum", "period": 300 } ],
+                  [ "AWS/States", "ExecutionTime", "StateMachineArn", "${CloudsploitIterator}", { "stat": "Sum", "period": 300 } ]
+                ],
+                "region": "${AWS::Region}",
+                "annotations": {
+                  "horizontal": [{"label": "10Min", "value": 600000 }]
+                },
+                "title": "State Machine ExecutionTime",
+                "period": 300,
+                "yAxis": {"left": {"min": 0 } }
+              }
+            },
+            {
+              "type": "text",
+              "x": 18,
+              "y": 15,
+              "width": 6,
+              "height": 3,
+              "properties": {
+                "markdown": "\n# Quick Links\n* [StateMachine](https://console.aws.amazon.com/states/home?region=${AWS::Region}#/statemachines/view/${ScoreCardGenerator})\n* [StateMachine-cs](https://console.aws.amazon.com/states/home?region=${AWS::Region}#/statemachines/view/${CloudsploitIterator})\n* [Daily ScoreCard](https://s3.console.aws.amazon.com/s3/buckets/${ScorecardBucket}/${ScorecardPrefix}/global/?region=${AWS::Region}&tab=overview)\n* [Error SQS Queue](https://console.aws.amazon.com/sqs/home?region=${AWS::Region}#queue-browser:selected=${SqsErrorQueue};prefix=)\n"
+              }
+            },
+            {
+              "type": "text",
+              "x": 18,
+              "y": 12,
+              "width": 6,
+              "height": 3,
+              "properties": {
+                "markdown": "\n# Tables\n* [Users](https://console.aws.amazon.com/dynamodb/home?region=${AWS::Region}#tables:selected=${UsersTable})\n* [Config](https://console.aws.amazon.com/dynamodb/home?region=${AWS::Region}#tables:selected=${ConfigTable})\n* [Accounts](https://console.aws.amazon.com/dynamodb/home?region=${AWS::Region}#tables:selected=${AccountsTable})\n* [Requirements](https://console.aws.amazon.com/dynamodb/home?region=${AWS::Region}#tables:selected=${RequirementsTable})\n* [NCR](https://console.aws.amazon.com/dynamodb/home?region=${AWS::Region}#tables:selected=${NCRTable})\n* [ExclusionsResources](https://console.aws.amazon.com/dynamodb/home?region=${AWS::Region}#tables:selected=${ExclusionsResourcesTable})\n* [Scores](https://console.aws.amazon.com/dynamodb/home?region=${AWS::Region}#tables:selected=${ScoresTable})\n* [AccountScores](https://console.aws.amazon.com/dynamodb/home?region=${AWS::Region}#tables:selected=${AccountScoresTable})\n* [Scans](https://console.aws.amazon.com/dynamodb/home?region=${AWS::Region}#tables:selected=${ScansTable})\n* [Audit](https://console.aws.amazon.com/dynamodb/home?region=${AWS::Region}#tables:selected=${AuditTable})\n"
+              }
+            },
+            {
+              "type": "metric",
+              "x": 0,
+              "y": 21,
+              "width": 24,
+              "height": 6,
+              "properties": {
+                "view": "singleValue",
+                "metrics": [
+                  [ "AWS/Lambda", "Throttles", "FunctionName", "${OpenScan}", { "stat": "Sum", "period": 604800, "label": "OpenScan"} ],
+                  [ "...", "${CloudSploitScanningFunctionName}", { "stat": "Sum", "period": 604800, "label": "${CloudSploitScanningFunctionName}" } ],
+                  [ "...", "${CloseScan}", { "stat": "Sum", "period": 604800, "label": "CloseScan" } ],
+                  [ "...", "${ScanError}", { "stat": "Sum", "period": 604800, "label": "ScanError" } ],
+                  [ "...", "${GenerateSpreadsheets}", { "stat": "Sum", "period": 604800, "label": "GenerateSpreadsheets" } ],
+                  [ "...", "${GenerateSpreadsheetsError}", { "stat": "Sum", "period": 604800, "label": "GenerateSpreadsheetsError" } ],
+                  [ "...", "${ScoreCalculations}", { "stat": "Sum", "period": 604800, "label": "ScoreCalculations" } ],
+                  [ "...", "${Exclude}", { "stat": "Sum", "period": 604800, "label": "Exclude" } ],
+                  [ "...", "${CloudSploitSetup}", { "stat": "Sum", "period": 604800, "label": "CloudSploitSetup" } ],
+                  [ "...", "${CloudSploitPopulate}", { "stat": "Sum", "period": 604800, "label": "CloudSploitPopulate" } ],
+                  [ "...", "${CloudSploitError}", { "stat": "Sum", "period": 604800, "label": "CloudSploitError" } ],
+                  [ "...", "${S3Import}", { "stat": "Sum", "period": 604800, "label": "S3Import" } ],
+                  [ "...", "${S3ImportError}", { "stat": "Sum", "period": 604800, "label": "S3ImportError" } ],
+                  [ "...", "${Load}", { "stat": "Sum", "period": 604800, "label": "Load" } ],
+                  [ "...", "${SetupUserSpreadsheets}", { "stat": "Sum", "period": 604800, "label": "SetupUserSpreadsheets" } ]
+                ],
+                "region": "${AWS::Region}",
+                "title": "Lambda Throttles",
+                "period": 300
+              }
+            },
+            {
+              "type": "metric",
+              "x": 0,
+              "y": 27,
+              "width": 24,
+              "height": 6,
+              "properties": {
+                "view": "singleValue",
+                "metrics": [
+                  [ "AWS/Lambda", "Duration", "FunctionName", "${OpenScan}", { "stat": "Average", "period": 604800, "label": "OpenScan"} ],
+                  [ "...", "${CloudSploitScanningFunctionName}", { "stat": "Sum", "period": 604800, "label": "${CloudSploitScanningFunctionName}" } ],
+                  [ "...", "${CloseScan}", { "stat": "Sum", "period": 604800, "label": "CloseScan" } ],
+                  [ "...", "${ScanError}", { "stat": "Sum", "period": 604800, "label": "ScanError" } ],
+                  [ "...", "${GenerateSpreadsheets}", { "stat": "Sum", "period": 604800, "label": "GenerateSpreadsheets" } ],
+                  [ "...", "${GenerateSpreadsheetsError}", { "stat": "Sum", "period": 604800, "label": "GenerateSpreadsheetsError" } ],
+                  [ "...", "${ScoreCalculations}", { "stat": "Sum", "period": 604800, "label": "ScoreCalculations" } ],
+                  [ "...", "${Exclude}", { "stat": "Sum", "period": 604800, "label": "Exclude" } ],
+                  [ "...", "${CloudSploitSetup}", { "stat": "Sum", "period": 604800, "label": "CloudSploitSetup" } ],
+                  [ "...", "${CloudSploitPopulate}", { "stat": "Sum", "period": 604800, "label": "CloudSploitPopulate" } ],
+                  [ "...", "${CloudSploitError}", { "stat": "Sum", "period": 604800, "label": "CloudSploitError" } ],
+                  [ "...", "${S3Import}", { "stat": "Sum", "period": 604800, "label": "S3Import" } ],
+                  [ "...", "${S3ImportError}", { "stat": "Sum", "period": 604800, "label": "S3ImportError" } ],
+                  [ "...", "${Load}", { "stat": "Sum", "period": 604800, "label": "Load" } ],
+                  [ "...", "${SetupUserSpreadsheets}", { "stat": "Sum", "period": 604800, "label": "SetupUserSpreadsheets" } ]
+                ],
+                "region": "${AWS::Region}",
+                "title": "Lambda Duration",
+                "period": 300
+              }
+            }
+          ]
+        }
+      - CloudSploitScanningFunctionName: !Select [ 6, !Split [ ':', !Ref CloudSploitScanningFunctionArn]]
+
+  ScanFunctionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+        - arn:aws:iam::aws:policy/AWSXrayWriteOnlyAccess
+      Policies:
+        - PolicyName: AccessResources
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: AccessToDynamodb
+                Effect: Allow
+                Action:
+                  - dynamodb:*Item
+                  - dynamodb:Query
+                  - dynamodb:Scan
+                Resource:
+                  - !Sub arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${UsersTable}*
+                  - !Sub arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${ConfigTable}*
+                  - !Sub arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${AccountsTable}*
+                  - !Sub arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${RequirementsTable}*
+                  - !Sub arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${NCRTable}*
+                  - !Sub arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${ExclusionsResourcesTable}*
+                  - !Sub arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${ScoresTable}*
+                  - !Sub arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${AccountScoresTable}*
+                  - !Sub arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${ScansTable}*
+                  - !Sub arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${AuditTable}*
+              - Sid: ReadAccessForS3
+                Effect: Allow
+                Action:
+                  - s3:GetObject
+                Resource:
+                  - !Sub arn:aws:s3:::${AccountImportBucket}/${AccountImportKey}
+                  - !Sub arn:aws:s3:::${UserImportBucket}/${UserImportKey}
+                  - !Sub arn:aws:s3:::${RequirementImportBucket}/${RequirementImportKey}
+                  - !Sub arn:aws:s3:::${ScorecardBucket}/${ScorecardPrefix}*
+                  - arn:aws:s3:::*/* # S3 Import requirements could import from any bucket.
+              - Sid: WriteAccessForS3
+                Effect: Allow
+                Action:
+                  - s3:PutObject
+                Resource:
+                  - !Sub arn:aws:s3:::${ScorecardBucket}/${ScorecardPrefix}/*
+  SqsErrorQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub ${ResourcePrefix}-${Stage}-error-queue
+      MessageRetentionPeriod: 1209600 # 14 days
+
+  StepFunctionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Path: "/"
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - !Sub states.${AWS::Region}.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      Policies:
+        - PolicyName: invokeLambdas
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement: # Required per https://docs.aws.amazon.com/step-functions/latest/dg/stepfunctions-iam.html
+              - Effect: Allow
+                Action: states:StartExecution
+                Resource: !Sub arn:aws:states:${AWS::Region}:${AWS::AccountId}:stateMachine:${ResourcePrefix}-${Stage}*
+              - Effect: Allow
+                Action: # Required per https://docs.aws.amazon.com/step-functions/latest/dg/stepfunctions-iam.html
+                  - states:DescribeExecution
+                  - states:StopExecution
+                Resource: '*'
+              - Effect: Allow
+                Action: # Required per https://docs.aws.amazon.com/step-functions/latest/dg/stepfunctions-iam.html
+                  - events:PutTargets
+                  - events:PutRule
+                  - events:DescribeRule
+                Resource: !Sub arn:aws:events:${AWS::Region}:${AWS::AccountId}:rule/StepFunctionsGetEventsForStepFunctionsExecutionRule
+              - Effect: Allow
+                Action: lambda:InvokeFunction
+                Resource:
+                  - !GetAtt OpenScan.Arn
+                  - !GetAtt CloseScan.Arn
+                  - !GetAtt ScanError.Arn
+                  - !GetAtt GenerateSpreadsheets.Arn
+                  - !GetAtt GenerateSpreadsheetsError.Arn
+                  - !GetAtt SetupUserSpreadsheets.Arn
+                  - !GetAtt ScoreCalculations.Arn
+                  - !GetAtt Exclude.Arn
+                  - !GetAtt CloudSploitSetup.Arn
+                  - !GetAtt CloudSploitPopulate.Arn
+                  - !GetAtt CloudSploitError.Arn
+                  - !GetAtt S3Import.Arn
+                  - !GetAtt S3ImportError.Arn
+                  - !GetAtt Load.Arn
+                  - !Ref CloudSploitScanningFunctionArn
+
+  ScoreCardGenerator:
+    Type: AWS::StepFunctions::StateMachine
+    Properties:
+      RoleArn: !GetAtt StepFunctionRole.Arn
+      StateMachineName: !Sub ${ResourcePrefix}-${Stage}
+      DefinitionString:
+        Fn::Sub: |
+          {
+            "Comment": "Gathers vulnerability information for Scorecards",
+            "StartAt": "OpenScan",
+            "States": {
+              "OpenScan": {
+                "Type": "Task",
+                "ResultPath": "$.openScan",
+                "Resource": "${OpenScan.Arn}",
+                "Catch": [{"ErrorEquals": ["States.ALL"], "Next": "Error", "ResultPath": "$.scanError"}],
+                "Next": "LoadStaticData"
+              },
+              "LoadStaticData": {
+                "Type": "Task",
+                "ResultPath": "$.load",
+                "Resource": "${Load.Arn}",
+                "Catch": [{"ErrorEquals": ["States.ALL"], "Next": "Error", "ResultPath": "$.scanError"}],
+                "Next": "ParallelLoading"
+              },
+              "ParallelLoading": {
+                "Type": "Parallel",
+                "Next": "Exclude",
+                "ResultPath": null,
+                "Catch": [{"ErrorEquals": ["States.ALL"], "Next": "Error", "ResultPath": "$.scanError"}],
+                "Branches": [
+                  {
+                    "StartAt": "CloudSploitSubStepFunction",
+                    "States": {
+                      "CloudSploitSubStepFunction": {
+                        "Comment": "Start sub step function because of 25000 step limit",
+                        "Type": "Task",
+                        "End": true,
+                        "ResultPath": null,
+                        "Resource": "arn:aws:states:::states:startExecution.sync:2",
+                        "Parameters": {
+                          "Input": {
+                            "scanId.$": "$.openScan.scanId",
+                            "accountIds.$": "$.load.accountIds",
+                            "cloudsploitSettingsMap.$": "$.load.cloudsploitSettingsMap",
+                            "AWS_STEP_FUNCTIONS_STARTED_BY_EXECUTION_ID.$": "$$.Execution.Id"
+                           },
+                          "StateMachineArn": "${CloudsploitIterator}",
+                          "Name.$": "$$.Execution.Name"
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "StartAt": "IterateS3Imports",
+                    "States": {
+                      "IterateS3Imports": {
+                        "Type": "Map",
+                        "End": true,
+                        "ItemsPath": "$.load.s3RequirementIds",
+                        "ResultPath": null,
+                        "Parameters": {
+                          "scanId.$": "$.openScan.scanId",
+                          "requirementId.$": "$$.Map.Item.Value",
+                          "accountIds.$": "$.load.accountIds"
+                        },
+                        "Iterator": {
+                          "StartAt": "S3Import",
+                          "States": {
+                            "S3Import": {
+                              "Comment": "Import findings from S3",
+                              "Type": "Task",
+                              "End": true,
+                              "ResultPath": null,
+                              "Resource": "${S3Import.Arn}",
+                              "Catch": [ { "ErrorEquals": [ "States.ALL" ], "Next": "S3ImportError", "ResultPath": "$.error" } ],
+                              "Retry": [{
+                                "ErrorEquals": ["Lambda.TooManyRequestsException"],
+                                "IntervalSeconds": 3,
+                                "MaxAttempts": 3,
+                                "BackoffRate": 2
+                              }]
+                            },
+                            "S3ImportError": {
+                              "Comment": "Handle any errors so we don't fail the whole scan. Update score table with error information",
+                              "Type": "Task",
+                              "End": true,
+                              "Resource": "${S3ImportError.Arn}"
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                ]
+              },
+              "Exclude": {
+                "Type": "Task",
+                "ResultPath": null,
+                "Resource": "${Exclude.Arn}",
+                "Catch": [{"ErrorEquals": ["States.ALL"], "Next": "Error", "ResultPath": "$.scanError"}],
+                "Retry": [{
+                  "ErrorEquals": ["Lambda.TooManyRequestsException"],
+                  "IntervalSeconds": 3,
+                  "MaxAttempts": 3,
+                  "BackoffRate": 2
+                }],
+                "Next": "ScoreCalculate"
+              },
+              "ScoreCalculate": {
+                "Type": "Task",
+                "ResultPath": null,
+                "Resource": "${ScoreCalculations.Arn}",
+                "Catch": [{"ErrorEquals": ["States.ALL"], "Next": "Error", "ResultPath": "$.scanError"}],
+                "Next": "ParallelSpreadsheets"
+              },
+              "ParallelSpreadsheets": {
+                "Type": "Parallel",
+                "ResultPath": null,
+                "Catch": [{"ErrorEquals": ["States.ALL"], "Next": "Error", "ResultPath": "$.scanError"}],
+                "Branches": [
+                  {
+                    "StartAt": "IterateAccountSpreadsheets",
+                    "States": {
+                      "IterateAccountSpreadsheets": {
+                        "Type": "Map",
+                        "End": true,
+                        "ItemsPath": "$.load.accountIds",
+                        "ResultPath": null,
+                        "Parameters": {
+                          "openScan.$": "$.openScan",
+                          "accountId.$": "$$.Map.Item.Value"
+                        },
+                        "Iterator": {
+                          "StartAt": "AccountSpreadsheets",
+                          "States": {
+                            "AccountSpreadsheets": {
+                              "Comment": "Generate spreadsheet for an account",
+                              "Type": "Task",
+                              "End": true,
+                              "ResultPath": null,
+                              "Resource": "${GenerateSpreadsheets.Arn}",
+                              "Catch": [ { "ErrorEquals": [ "States.ALL" ], "Next": "AccountSpreadsheetsError", "ResultPath": "$.error" } ],
+                              "Retry": [{
+                                "ErrorEquals": ["Lambda.TooManyRequestsException"],
+                                "IntervalSeconds": 3,
+                                "MaxAttempts": 3,
+                                "BackoffRate": 2
+                              }]
+                            },
+                            "AccountSpreadsheetsError": {
+                              "Comment": "Handle any errors so we don't fail the whole scan. Update scan table with error information",
+                              "Type": "Task",
+                              "End": true,
+                              "Resource": "${GenerateSpreadsheetsError.Arn}"
+                            }
+                          }
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "StartAt": "SetupUserSpreadsheets",
+                    "States": {
+                      "SetupUserSpreadsheets": {
+                        "Comment": "Get user emails to power user spreadsheet iterator. Not included from the start to save state size",
+                        "Type": "Task",
+                        "Next": "IterateUserSpreadsheets",
+                        "ResultPath": "$",
+                        "Resource": "${SetupUserSpreadsheets.Arn}"
+                      },
+                      "IterateUserSpreadsheets": {
+                        "Type": "Map",
+                        "End": true,
+                        "ItemsPath": "$.userEmails",
+                        "ResultPath": null,
+                        "Parameters": {
+                          "openScan.$": "$.openScan",
+                          "userEmail.$": "$$.Map.Item.Value"
+                        },
+                        "Iterator": {
+                          "StartAt": "UserSpreadsheets",
+                          "States": {
+                            "UserSpreadsheets": {
+                              "Comment": "Generate spreadsheet for a user's account",
+                              "Type": "Task",
+                              "End": true,
+                              "ResultPath": null,
+                              "Resource": "${GenerateSpreadsheets.Arn}",
+                              "Catch": [ { "ErrorEquals": [ "States.ALL" ], "Next": "UserSpreadsheetsError", "ResultPath": "$.error" } ],
+                              "Retry": [{
+                                "ErrorEquals": ["Lambda.TooManyRequestsException"],
+                                "IntervalSeconds": 3,
+                                "MaxAttempts": 3,
+                                "BackoffRate": 2
+                              }]
+                            },
+                            "UserSpreadsheetsError": {
+                              "Comment": "Handle any errors so we don't fail the whole scan. Update score table with error information",
+                              "Type": "Task",
+                              "End": true,
+                              "Resource": "${GenerateSpreadsheetsError.Arn}"
+                            }
+                          }
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "StartAt": "IteratePayerSpreadsheets",
+                    "States": {
+                      "IteratePayerSpreadsheets": {
+                        "Type": "Map",
+                        "End": true,
+                        "ItemsPath": "$.load.payerIds",
+                        "ResultPath": null,
+                        "Parameters": {
+                          "openScan.$": "$.openScan",
+                          "payerId.$": "$$.Map.Item.Value"
+                        },
+                        "Iterator": {
+                          "StartAt": "PayerSpreadsheets",
+                          "States": {
+                            "PayerSpreadsheets": {
+                              "Comment": "Generate spreadsheet for a payer account's sub accounts",
+                              "Type": "Task",
+                              "End": true,
+                              "ResultPath": null,
+                              "Resource": "${GenerateSpreadsheets.Arn}",
+                              "Catch": [ { "ErrorEquals": [ "States.ALL" ], "Next": "PayerSpreadsheetsError", "ResultPath": "$.error" } ],
+                              "Retry": [{
+                                "ErrorEquals": ["Lambda.TooManyRequestsException"],
+                                "IntervalSeconds": 3,
+                                "MaxAttempts": 3,
+                                "BackoffRate": 2
+                              }]
+                            },
+                            "PayerSpreadsheetsError": {
+                              "Comment": "Handle any errors so we don't fail the whole scan. Update scan table with error information",
+                              "Type": "Task",
+                              "End": true,
+                              "Resource": "${GenerateSpreadsheetsError.Arn}"
+                            }
+                          }
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "StartAt": "GlobalSpreadsheet",
+                    "States": {
+                      "GlobalSpreadsheet": {
+                        "Comment": "Generate spreadsheet for all accounts",
+                        "Type": "Task",
+                        "End": true,
+                        "ResultPath": null,
+                        "Resource": "${GenerateSpreadsheets.Arn}",
+                        "Catch": [ { "ErrorEquals": [ "States.ALL" ], "Next": "GlobalSpreadsheetError", "ResultPath": "$.error" } ],
+                        "Retry": [{
+                          "ErrorEquals": ["Lambda.TooManyRequestsException"],
+                          "IntervalSeconds": 3,
+                          "MaxAttempts": 3,
+                          "BackoffRate": 2
+                        }]
+                      },
+                      "GlobalSpreadsheetError": {
+                        "Comment": "Handle any errors so we don't fail the whole scan. Update scan table with error information",
+                        "Type": "Task",
+                        "Next": "GlobalSpreadsheetErrorEnqueue",
+                        "Resource": "${GenerateSpreadsheetsError.Arn}",
+                        "ResultPath": null
+                      },
+                      "GlobalSpreadsheetErrorEnqueue": {
+                        "Comment": "Add error to SQS queue for review",
+                        "Type": "Task",
+                        "End": true,
+                        "Resource": "arn:aws:states:::sqs:sendMessage",
+                        "Parameters": {
+                          "QueueUrl": "${SqsErrorQueue}",
+                          "MessageBody": {
+                            "scanId.$": "$.openScan.scanId",
+                            "error.$": "$.error"
+                          }
+                        }
+                      }
+                    }
+                  }
+                ],
+                "Next": "CloseScan"
+              },
+              "CloseScan": {
+                "Type": "Task",
+                "ResultPath": null,
+                "Resource": "${CloseScan.Arn}",
+                "Catch": [{"ErrorEquals": ["States.ALL"], "Next": "Error", "ResultPath": "$.scanError"}],
+                "Next": "Finish"
+              },
+              "Finish": {
+                "Type": "Pass",
+                "End": true
+              },
+              "Error": {
+                "Type": "Task",
+                "Resource": "${ScanError.Arn}",
+                "Next": "Fail"
+              },
+              "Fail": {
+                "Type": "Fail"
+              }
+            }
+          }
+
+  CloudsploitIterator:
+    Type: AWS::StepFunctions::StateMachine
+    Properties:
+      RoleArn: !GetAtt StepFunctionRole.Arn
+      StateMachineName: !Sub ${ResourcePrefix}-${Stage}-cloudsploit-iterator
+      DefinitionString:
+        Fn::Sub: |
+          {
+            "StartAt": "IterateCloudSploitAccounts",
+            "States": {
+              "IterateCloudSploitAccounts": {
+                "Type": "Map",
+                "End": true,
+                "ItemsPath": "$.accountIds",
+                "ResultPath": null,
+                "Parameters": {
+                  "scanId.$": "$.scanId",
+                  "cloudsploitSettingsMap.$": "$.cloudsploitSettingsMap",
+                  "accountId.$": "$$.Map.Item.Value"
+                },
+                "Iterator": {
+                  "StartAt": "CloudSploitSetup",
+                  "States": {
+                    "CloudSploitSetup": {
+                      "Comment": "Create event structure for CloudSploit scan lambda",
+                      "Type": "Task",
+                      "Next": "CloudSploitScan",
+                      "Resource": "${CloudSploitSetup.Arn}",
+                      "ResultPath": "$.cloudsploitSetup",
+                      "Catch": [ { "ErrorEquals": [ "States.ALL" ], "Next": "CloudSploitError", "ResultPath": "$.error" } ],
+                      "Retry": [{
+                        "ErrorEquals": ["Lambda.TooManyRequestsException"],
+                        "IntervalSeconds": 3,
+                        "MaxAttempts": 3,
+                        "BackoffRate": 2
+                      }]
+                    },
+                    "CloudSploitScan": {
+                      "Comment": "Start CloudSploit scan. Function is in cloudsploit stack",
+                      "Type": "Task",
+                      "Next": "CloudSploitPopulate",
+                      "Resource": "arn:aws:states:::lambda:invoke",
+                      "ResultPath": null,
+                      "Parameters": {
+                        "FunctionName": "${CloudSploitScanningFunctionArn}",
+                        "Payload.$": "$.cloudsploitSetup"
+                      },
+                      "Catch": [ { "ErrorEquals": [ "States.ALL" ], "Next": "CloudSploitError", "ResultPath": "$.error" } ],
+                      "Retry": [{
+                        "ErrorEquals": ["Lambda.TooManyRequestsException"],
+                        "IntervalSeconds": 3,
+                        "MaxAttempts": 3,
+                        "BackoffRate": 2
+                      }]
+                    },
+                    "CloudSploitPopulate": {
+                      "Comment": "Pull cloudsploit scan results in from S3, to NCR table",
+                      "Type": "Task",
+                      "End": true,
+                      "Resource": "${CloudSploitPopulate.Arn}",
+                      "Catch": [ { "ErrorEquals": [ "States.ALL" ], "Next": "CloudSploitError", "ResultPath": "$.error" } ],
+                      "Retry": [{
+                        "ErrorEquals": ["Lambda.TooManyRequestsException"],
+                        "IntervalSeconds": 3,
+                        "MaxAttempts": 3,
+                        "BackoffRate": 2
+                      }]
+                    },
+                    "CloudSploitError": {
+                      "Comment": "Handle any errors so we don't fail the whole scan. Update scans table with error information",
+                      "Type": "Task",
+                      "End": true,
+                      "Resource": "${CloudSploitError.Arn}",
+                      "Retry": [{
+                        "ErrorEquals": ["Lambda.TooManyRequestsException"],
+                        "IntervalSeconds": 3,
+                        "MaxAttempts": 3,
+                        "BackoffRate": 2
+                      }]
+                    }
+                  }
+                }
+              }
+            }
+          }

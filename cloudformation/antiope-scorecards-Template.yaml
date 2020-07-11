@@ -1,0 +1,185 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Antiope Scorecards Master Stack
+
+
+Parameters:
+  Domain:
+    Type: String
+    Description: Domain name to host application
+    Default: ''
+  ApiDomain:
+    Type: String
+    Description: Domain name/url for the API
+  CertArn:
+    Type: String
+    Description: The ARN of the ACM cert
+  Stage:
+    Type: String
+  ResourcePrefix:
+    Type: String
+    Description: The prefix for misc resource names
+    Default: antiope-scorecards
+  CloudSploitScanningFunctionArn:
+    Type: String
+    Description: The ARN of the CloudSploit scanning lambda function
+  StateLambdaFunctionsMemorySize:
+    Type: Number
+    AllowedValues: [128, 192, 256, 320, 384, 448, 512, 576, 640, 704, 768, 832, 896, 960, 1024, 1088, 1152, 1216, 1280, 1344, 1408, 1472, 1536, 1600, 1664, 1728, 1792, 1856, 1920, 1984, 2048, 2112, 2176, 2240, 2304, 2368, 2432, 2496, 2560, 2624, 2688, 2752, 2816, 2880, 2944, 3008]
+    Default: 3008
+  StateLambdaFunctionsTimeout:
+    Type: Number
+    MinValue: 3
+    MaxValue: 900
+    Default: 900
+  AccountImportBucket:
+    Type: String
+    Description: The bucket to import accounts from
+  AccountImportKey:
+    Type: String
+    Description: The s3 object key to import accounts from
+  UserImportBucket:
+    Type: String
+    Description: The bucket to import users from
+  UserImportKey:
+    Type: String
+    Description: The s3 object key to import users from
+  RequirementImportBucket:
+    Type: String
+    Description: The bucket to import requirements from
+  RequirementImportKey:
+    Type: String
+    Description: The s3 object key to import requirements from
+  CloudSploitPrefix:
+    Type: String
+    Description: Used as part of s3 key for CloudSploit results objects
+  CloudSploitResultBucket:
+    Type: String
+    Description: The bucket to import CloudSploit results from
+  ScorecardBucket:
+    Type: String
+    Description: The bucket to store scorecard spreadsheets in
+  ScorecardPrefix:
+    Type: String
+    Description: The prefix for scorecard spreadsheet objects
+  EsEndpoint:
+    Type: String
+    Description: The endpoint for the Elasticsearch cluster
+  EsRegion:
+    Type: String
+    Description: The region for the Elasticsearch cluster
+  RemediationRoleName:
+    Type: String
+    Description: Name of the remediation role to assume. Assumed by remediation manager and workers
+
+  pTemplateURL:
+    Type: String
+    Description: Path to the Template used to deploy this stack
+
+Resources:
+  Frontend:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: frontend.yaml
+      Parameters:
+        Stage: !Ref Stage
+        ResourcePrefix: !Ref ResourcePrefix
+        Domain: !Ref Domain
+
+  BackendApi:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: api.yaml
+      Parameters:
+        Stage: !Ref Stage
+        ResourcePrefix: !Ref ResourcePrefix
+        Domain: !Ref ApiDomain
+        CertArn: !Ref CertArn
+        CognitoUserPoolArn: !GetAtt Auth.Outputs.UserPoolArn
+        UsersTable: !GetAtt DynamoDB.Outputs.UsersTableName
+        ConfigTable: !GetAtt DynamoDB.Outputs.ConfigTableName
+        AccountsTable: !GetAtt DynamoDB.Outputs.AccountsTableName
+        RequirementsTable: !GetAtt DynamoDB.Outputs.RequirementsTableName
+        NCRTable: !GetAtt DynamoDB.Outputs.NCRTableName
+        ExclusionsResourcesTable: !GetAtt DynamoDB.Outputs.ExclusionsTableName
+        ScoresTable: !GetAtt DynamoDB.Outputs.ScoresTableName
+        AccountScoresTable: !GetAtt DynamoDB.Outputs.AccountScoresTableName
+        ScansTable: !GetAtt DynamoDB.Outputs.ScansTableName
+        AuditTable: !GetAtt DynamoDB.Outputs.AuditTableName
+        ScorecardBucket: !Ref ScorecardBucket
+        ScorecardPrefix: !Ref ScorecardPrefix
+        EsEndpoint: !Ref EsEndpoint
+        EsRegion: !Ref EsRegion
+        RemediationRoleName: !Ref RemediationRoleName
+
+  Worker:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: worker.yaml
+      Parameters:
+        Stage: !Ref Stage
+        ResourcePrefix: !Ref ResourcePrefix
+
+  DynamoDB:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: dynamodb.yaml
+      Parameters:
+        Stage: !Ref Stage
+        ResourcePrefix: !Ref ResourcePrefix
+
+  Auth:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: auth.yaml
+      Parameters:
+        Stage: !Ref Stage
+        ResourcePrefix: !Ref ResourcePrefix
+        CallBackUrls: !Join [',', [!Join ['', ['https://main.', !GetAtt Frontend.Outputs.AmplifyDefaultDomain, '/callback']], !Join ['', ['https://', !Ref Domain, '/callback']]]]
+
+  StepFunctions:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: stepfunctions.yaml
+      Parameters:
+        Stage: !Ref Stage
+        UsersTable: !GetAtt DynamoDB.Outputs.UsersTableName
+        ConfigTable: !GetAtt DynamoDB.Outputs.ConfigTableName
+        AccountsTable: !GetAtt DynamoDB.Outputs.AccountsTableName
+        RequirementsTable: !GetAtt DynamoDB.Outputs.RequirementsTableName
+        NCRTable: !GetAtt DynamoDB.Outputs.NCRTableName
+        ExclusionsResourcesTable: !GetAtt DynamoDB.Outputs.ExclusionsTableName
+        ScoresTable: !GetAtt DynamoDB.Outputs.ScoresTableName
+        AccountScoresTable: !GetAtt DynamoDB.Outputs.AccountScoresTableName
+        ScansTable: !GetAtt DynamoDB.Outputs.ScansTableName
+        AuditTable: !GetAtt DynamoDB.Outputs.AuditTableName
+        ResourcePrefix: !Ref ResourcePrefix
+        CloudSploitScanningFunctionArn: !Ref CloudSploitScanningFunctionArn
+        StateLambdaFunctionsMemorySize: !Ref StateLambdaFunctionsMemorySize
+        StateLambdaFunctionsTimeout: !Ref StateLambdaFunctionsTimeout
+        AccountImportBucket: !Ref AccountImportBucket
+        AccountImportKey: !Ref AccountImportKey
+        UserImportBucket: !Ref UserImportBucket
+        UserImportKey: !Ref UserImportKey
+        RequirementImportBucket: !Ref RequirementImportBucket
+        RequirementImportKey: !Ref RequirementImportKey
+        CloudSploitPrefix: !Ref CloudSploitPrefix
+        CloudSploitResultBucket: !Ref CloudSploitResultBucket
+        ScorecardBucket: !Ref ScorecardBucket
+        ScorecardPrefix: !Ref ScorecardPrefix
+
+Outputs:
+  AmplifyCertDomain:
+    Value: !GetAtt Frontend.Outputs.AmplifyCertDomain
+  AmplifyCertRecord:
+    Value: !GetAtt Frontend.Outputs.AmplifyCertRecord
+  ApiDomain:
+    Value: !GetAtt BackendApi.Outputs.ApiDomain
+  ApiRecord:
+    Value: !GetAtt BackendApi.Outputs.ApiRecord
+  AmplifyAppId:
+    Value: !GetAtt Frontend.Outputs.AmplifyAppId
+  AmplifyDomainName:
+    Value: !GetAtt Frontend.Outputs.AmplifyDomainName
+  TemplateURL:
+    Description: URL to the Transformed Template this stack was deployed with (for promotion to another environment)
+    Value: !Ref pTemplateURL

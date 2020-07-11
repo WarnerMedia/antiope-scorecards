@@ -1,0 +1,17 @@
+version: 0.2
+phases:
+  install:
+    runtime-versions:
+      python: 3.8
+    commands:
+      - echo "Installing dependencies"
+  build:
+    commands:
+      - set -euxo pipefail
+      - echo "Installing dependencies"
+      - pip install -r requirements-dev.txt
+      - make sdk-generate
+      - echo "Assuming ci-integration-test role"
+      - export $(aws sts assume-role --role-arn arn:aws:iam::${TARGET_ACCOUNT_ID}:role/${ROLE_PREFIX}-ci-integration-test --role-session-name ci-integration-test --output text --query "[['AWS_ACCESS_KEY_ID',Credentials.AccessKeyId],['AWS_SECRET_ACCESS_KEY',Credentials.SecretAccessKey],['AWS_SESSION_TOKEN',Credentials.SessionToken]][*].join(\`=\`,@)")
+      - echo "Running integration tests"
+      - make integration-test

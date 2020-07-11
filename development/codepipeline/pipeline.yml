@@ -1,0 +1,565 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Antiope Scorecards CI/CD Pipeline
+
+
+Parameters:
+  BuildImageName:
+    Type: String
+    Description: Docker image for application build
+    Default: aws/codebuild/amazonlinux2-x86_64-standard:2.0
+  Stage1:
+    Type: String
+    Description: The name of the stage this pipeline deploys
+  Stage2:
+    Type: String
+    Description: (optional) add a manual approval/second stage after Stage1
+    Default: ''
+  UserPrefix:
+    Type: String
+    Description: The prefix for the name of the CI user that uploads code and triggers codepipeline
+    Default: antiope-scorecards
+  RolePrefix:
+    Type: String
+    Description: The prefix for the name of the IAM role resources
+    Default: antiope-scorecards
+  BucketPrefix:
+    Type: String
+    Description: The prefix for S3 bucket names
+    Default: antiope-scorecards
+  StackPrefix:
+    Type: String
+    Description: The prefix for the name of cloudformation stacks
+    Default: antiope-scorecards
+  ResourcePrefix:
+    Type: String
+    Description: The prefix for misc resource names
+    Default: antiope-scorecards
+
+
+Conditions:
+  AddSecondEnvironment: !Not [ !Equals [ !Ref Stage2, '' ] ]
+
+
+Resources:
+  CIUser:
+    Type: AWS::IAM::User
+    Properties:
+      UserName: !Sub ${UserPrefix}-ci-deploy
+      Policies:
+        - PolicyName: ci
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: UploadCode
+                Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:GetObjectAcl
+                  - s3:GetObjectVersion
+                  - s3:PutObject
+                  - s3:PutObjectAcl
+                Resource:
+                  - !Sub arn:${AWS::Partition}:s3:::${BucketPrefix}-upload-${AWS::AccountId}
+                  - !Sub arn:${AWS::Partition}:s3:::${BucketPrefix}-upload-${AWS::AccountId}/*
+              - Sid: GetSSM
+                Effect: Allow
+                Action: ssm:GetParameter
+                Resource:
+                  - !Sub arn:${AWS::Partition}:ssm:*:${AWS::AccountId}:parameter/${ResourcePrefix}/*
+              - Sid: StartAmplify
+                Effect: Allow
+                Action: amplify:StartDeployment
+                Resource: '*'
+              - Sid: StartCodePipeline
+                Effect: Allow
+                Action: codepipeline:StartPipelineExecution
+                Resource: !Sub arn:${AWS::Partition}:codepipeline:*:${AWS::AccountId}:${Pipeline}
+
+  PipelineBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub ${BucketPrefix}-upload-${AWS::AccountId}
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: True
+        BlockPublicPolicy: True
+        IgnorePublicAcls: True
+        RestrictPublicBuckets: True
+      VersioningConfiguration:
+        Status: Enabled
+
+  PipelineNotificationsTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      DisplayName: !Sub ${ResourcePrefix}-pipeline-notifications-${AWS::Region}
+
+  PipelineServiceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub ${RolePrefix}-pipeline-service-role
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Action: sts:AssumeRole
+            Principal:
+              Service:
+                - codepipeline.amazonaws.com
+                - codebuild.amazonaws.com
+      Policies:
+        - PolicyName: root
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Resource: '*'
+                Effect: Allow
+                Action:
+                  - codebuild:StartBuild
+                  - codebuild:BatchGetBuilds
+                  - sns:Publish
+              - Resource: '*'
+                Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+              - Resource: '*'
+                Effect: Allow
+                Action:
+                  - kms:Encrypt
+                  - kms:Decrypt
+                  - kms:ReEncrypt*
+                  - kms:GenerateDataKey*
+                  - kms:DescribeKey
+                  - sns:Publish
+              - Effect: Allow
+                Action: sts:AssumeRole
+                Resource:
+                  - !Sub arn:aws:iam::${AWS::AccountId}:role/${RolePrefix}-ci-deploy-cfn
+                  - !Sub arn:aws:iam::${AWS::AccountId}:role/${RolePrefix}-ci-integration-test
+                  - !Sub arn:aws:iam::${AWS::AccountId}:role/${RolePrefix}-ci-post-deploy
+              - Effect: Allow
+                Action:
+                  - s3:Get*
+                  - s3:ListBucket
+                Resource:
+                  - !Sub ${PipelineBucket.Arn}
+                  - !Sub ${PipelineBucket.Arn}/*
+                  - !Sub ${PipelineBucket.Arn}
+                  - !Sub ${PipelineBucket.Arn}/*
+
+  PipelineServiceRoleS3Policy:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: !Sub ${ResourcePrefix}-pipeline-s3-policy
+      Roles:
+        - !Ref PipelineServiceRole
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Action:
+              - s3:PutObject
+              - s3:GetObject
+              - s3:GetObjectVersion
+              - s3:GetBucketVersioning
+            Resource:
+              - !Sub arn:aws:s3:::${BucketPrefix}-ci-artifacts-${AWS::AccountId}-*
+              - !Sub arn:aws:s3:::${BucketPrefix}-ci-artifacts-${AWS::AccountId}-*/*
+              - !Sub arn:aws:s3:::${BucketPrefix}-cfn-artifacts-${AWS::AccountId}-*
+              - !Sub arn:aws:s3:::${BucketPrefix}-cfn-artifacts-${AWS::AccountId}-*/*
+
+  Pipeline:
+    Type: AWS::CodePipeline::Pipeline
+    Properties:
+      RoleArn: !GetAtt PipelineServiceRole.Arn
+      Name: !Sub ${ResourcePrefix}-pipeline
+      ArtifactStores:
+        - Region: !Ref AWS::Region
+          ArtifactStore:
+            Type: S3
+            Location: !Sub ${BucketPrefix}-ci-artifacts-${AWS::AccountId}-${AWS::Region}
+            EncryptionKey:
+              Id: !Sub alias/${ResourcePrefix}-artifact-bucket
+              Type: KMS
+      Stages:
+        - Name: source
+          Actions:
+            - Name: source-code
+              RunOrder: 2
+              ActionTypeId:
+                Category: Source
+                Provider: S3
+                Owner: AWS
+                Version: '1'
+              OutputArtifacts:
+                - Name: SourceCode
+              Configuration:
+                S3Bucket: !Ref PipelineBucket
+                S3ObjectKey: backend.zip
+                PollForSourceChanges: False
+            - Name: source-config
+              RunOrder: 2
+              ActionTypeId:
+                Category: Source
+                Provider: S3
+                Owner: AWS
+                Version: '1'
+              OutputArtifacts:
+                - Name: SourceConfig
+              Configuration:
+                S3Bucket: !Ref PipelineBucket
+                S3ObjectKey: config.zip
+                PollForSourceChanges: False
+        - Name: unit-test
+          Actions:
+            - Name: unit-test
+              RunOrder: 1
+              InputArtifacts:
+                - Name: SourceCode
+              ActionTypeId:
+                Category: Build
+                Provider: CodeBuild
+                Owner: AWS
+                Version: '1'
+              Configuration:
+                ProjectName: !Ref UnitTestProject
+        - Name: build
+          Actions:
+            - Name: build
+              RunOrder: 1
+              InputArtifacts:
+                - Name: SourceCode
+              OutputArtifacts:
+                - Name: BuildArtifact
+              ActionTypeId:
+                Category: Build
+                Provider: CodeBuild
+                Owner: AWS
+                Version: '1'
+              Configuration:
+                ProjectName: !Ref BuildProject
+                EnvironmentVariables: !Sub |
+                  [{
+                    "name": "EXECUTION_ID",
+                    "value": "#{codepipeline.PipelineExecutionId}"
+                  },
+                  {
+                    "name": "AWS_REGIONS",
+                    "value": "${AWS::Region}"
+                  }, {
+                    "name": "ROLE_PREFIX",
+                    "value": "${RolePrefix}"
+                  }, {
+                    "name": "BUCKET_PREFIX",
+                    "value": "${BucketPrefix}"
+                  }, {
+                    "name": "STACK_PREFIX",
+                    "value": "${StackPrefix}"
+                  }, {
+                    "name": "RESOURCE_PREFIX",
+                    "value": "${ResourcePrefix}"
+                  }, {
+                    "name": "AWS_ACCOUNT_ID",
+                    "value": "${AWS::AccountId}"
+                  }]
+        - Name: !Sub ${Stage1}-deploy
+          Actions:
+            - Name: create-change-set
+              RunOrder: 1
+              RoleArn: !Sub arn:aws:iam::${AWS::AccountId}:role/${RolePrefix}-ci-deploy-cfn
+              Region: !Ref AWS::Region
+              InputArtifacts:
+                - Name: BuildArtifact
+                - Name: SourceConfig
+              ActionTypeId:
+                Category: Deploy
+                Provider: CloudFormation
+                Owner: AWS
+                Version: '1'
+              Configuration:
+                ActionMode: CHANGE_SET_REPLACE
+                Capabilities: CAPABILITY_IAM,CAPABILITY_AUTO_EXPAND
+                ChangeSetName: !Sub ${StackPrefix}-change-set
+                RoleArn: !Sub arn:aws:iam::${AWS::AccountId}:role/${RolePrefix}-ci-cloudformation
+                StackName: !Sub ${StackPrefix}-${Stage1}
+                TemplatePath: !Sub BuildArtifact::templates/main.${AWS::Region}.packaged.yml
+                TemplateConfiguration: !Sub SourceConfig::${Stage1}.json
+                ParameterOverrides: !Sub |
+                  { "pTemplateURL": "https://${BucketPrefix}-cfn-artifacts-${AWS::AccountId}-${AWS::Region}.s3.amazonaws.com/antiope-scorecards-#{codepipeline.PipelineExecutionId}-Transformed-Template.yaml"
+                  }
+            - Name: deploy-change-set
+              RunOrder: 2
+              RoleArn: !Sub arn:aws:iam::${AWS::AccountId}:role/${RolePrefix}-ci-deploy-cfn
+              Region: !Ref AWS::Region
+              ActionTypeId:
+                Category: Deploy
+                Provider: CloudFormation
+                Owner: AWS
+                Version: '1'
+              Configuration:
+                ActionMode: CHANGE_SET_EXECUTE
+                Capabilities: CAPABILITY_IAM,CAPABILITY_AUTO_EXPAND
+                ChangeSetName: !Sub ${StackPrefix}-change-set
+                RoleArn: !Sub arn:aws:iam::${AWS::AccountId}:role/${RolePrefix}-ci-cloudformation
+                StackName: !Sub ${StackPrefix}-${Stage1}
+            - Name: post-deploy
+              RunOrder: 3
+              InputArtifacts:
+                - Name: SourceCode
+              ActionTypeId:
+                Category: Build
+                Provider: CodeBuild
+                Owner: AWS
+                Version: '1'
+              Configuration:
+                ProjectName: !Ref PostDeployProject
+                EnvironmentVariables: !Sub |
+                  [{
+                    "name": "TARGET_ACCOUNT_ID",
+                    "value": "${AWS::AccountId}"
+                  }, {
+                    "name": "AWS_REGION",
+                    "value": "${AWS::Region}"
+                  }, {
+                    "name": "ROLE_PREFIX",
+                    "value": "${RolePrefix}"
+                  }, {
+                    "name": "BUCKET_PREFIX",
+                    "value": "${BucketPrefix}"
+                  }, {
+                    "name": "STACK_PREFIX",
+                    "value": "${StackPrefix}"
+                  }, {
+                    "name": "RESOURCE_PREFIX",
+                    "value": "${ResourcePrefix}"
+                  }, {
+                    "name": "STAGE",
+                    "value": "${Stage1}"
+                  }]
+            - Name: integration-test
+              RunOrder: 4
+              InputArtifacts:
+                - Name: SourceCode
+              ActionTypeId:
+                Category: Build
+                Provider: CodeBuild
+                Owner: AWS
+                Version: '1'
+              Configuration:
+                ProjectName: !Ref IntegrationTestProject
+                EnvironmentVariables: !Sub |
+                    [{
+                      "name": "TARGET_ACCOUNT_ID",
+                      "value": "${AWS::AccountId}"
+                    }, {
+                      "name": "AWS_REGION",
+                      "value": "${AWS::Region}"
+                    }, {
+                      "name": "ROLE_PREFIX",
+                      "value": "${RolePrefix}"
+                    }, {
+                      "name": "BUCKET_PREFIX",
+                      "value": "${BucketPrefix}"
+                    }, {
+                      "name": "STACK_PREFIX",
+                      "value": "${StackPrefix}"
+                    }, {
+                      "name": "RESOURCE_PREFIX",
+                      "value": "${ResourcePrefix}"
+                    }, {
+                      "name": "STAGE",
+                      "value": "${Stage1}"
+                    }]
+        - !If
+          - AddSecondEnvironment
+          - Name: !Sub ${Stage2}-manual-approval
+            Actions:
+              - Name: !Sub manual-approval-${Stage2}
+                RunOrder: 1
+                ActionTypeId:
+                  Category: Approval
+                  Provider: Manual
+                  Owner: AWS
+                  Version: '1'
+                Configuration:
+                  NotificationArn: !Ref PipelineNotificationsTopic
+          - !Ref AWS::NoValue
+        - !If
+          - AddSecondEnvironment
+          - Name: !Sub ${Stage2}-deploy
+            Actions:
+              - Name: create-change-set
+                RunOrder: 1
+                InputArtifacts:
+                  - Name: BuildArtifact
+                  - Name: SourceConfig
+                RoleArn: !Sub arn:aws:iam::${AWS::AccountId}:role/${RolePrefix}-ci-deploy-cfn
+                Region: !Ref AWS::Region
+                ActionTypeId:
+                  Category: Deploy
+                  Provider: CloudFormation
+                  Owner: AWS
+                  Version: '1'
+                Configuration:
+                  ActionMode: CHANGE_SET_REPLACE
+                  Capabilities: CAPABILITY_IAM,CAPABILITY_AUTO_EXPAND
+                  ChangeSetName: !Sub ${StackPrefix}-change-set
+                  RoleArn: !Sub arn:aws:iam::${AWS::AccountId}:role/${RolePrefix}-ci-cloudformation
+                  StackName: !Sub ${StackPrefix}-${Stage2}
+                  TemplatePath: !Sub BuildArtifact::templates/main.${AWS::Region}.packaged.yml
+                  TemplateConfiguration: !Sub SourceConfig::${Stage2}.json
+                  ParameterOverrides: !Sub |
+                    { "pTemplateURL": "https://${BucketPrefix}-cfn-artifacts-${AWS::AccountId}-${AWS::Region}.s3.amazonaws.com/antiope-scorecards-#{codepipeline.PipelineExecutionId}-Transformed-Template.yaml"
+                    }
+              - Name: deploy-change-set
+                RunOrder: 2
+                RoleArn: !Sub arn:aws:iam::${AWS::AccountId}:role/${RolePrefix}-ci-deploy-cfn
+                Region: !Ref AWS::Region
+                ActionTypeId:
+                  Category: Deploy
+                  Provider: CloudFormation
+                  Owner: AWS
+                  Version: '1'
+                Configuration:
+                  ActionMode: CHANGE_SET_EXECUTE
+                  Capabilities: CAPABILITY_IAM,CAPABILITY_AUTO_EXPAND
+                  ChangeSetName: !Sub ${StackPrefix}-change-set
+                  RoleArn: !Sub arn:aws:iam::${AWS::AccountId}:role/${RolePrefix}-ci-cloudformation
+                  StackName: !Sub ${StackPrefix}-${Stage2}
+              - Name: post-deploy
+                RunOrder: 3
+                InputArtifacts:
+                  - Name: SourceCode
+                ActionTypeId:
+                  Category: Build
+                  Provider: CodeBuild
+                  Owner: AWS
+                  Version: '1'
+                Configuration:
+                  ProjectName: !Ref PostDeployProject
+                  EnvironmentVariables: !Sub |
+                    [{
+                      "name": "TARGET_ACCOUNT_ID",
+                      "value": "${AWS::AccountId}"
+                    }, {
+                      "name": "AWS_REGION",
+                      "value": "${AWS::Region}"
+                    }, {
+                      "name": "ROLE_PREFIX",
+                      "value": "${RolePrefix}"
+                    }, {
+                      "name": "BUCKET_PREFIX",
+                      "value": "${BucketPrefix}"
+                    }, {
+                      "name": "STACK_PREFIX",
+                      "value": "${StackPrefix}"
+                    }, {
+                      "name": "RESOURCE_PREFIX",
+                      "value": "${ResourcePrefix}"
+                    }, {
+                      "name": "STAGE",
+                      "value": "${Stage2}"
+                    }]
+              - Name: integration-test
+                RunOrder: 4
+                InputArtifacts:
+                  - Name: SourceCode
+                ActionTypeId:
+                  Category: Build
+                  Provider: CodeBuild
+                  Owner: AWS
+                  Version: '1'
+                Configuration:
+                  ProjectName: !Ref IntegrationTestProject
+                  EnvironmentVariables: !Sub |
+                    [{
+                      "name": "TARGET_ACCOUNT_ID",
+                      "value": "${AWS::AccountId}"
+                    }, {
+                      "name": "AWS_REGION",
+                      "value": "${AWS::Region}"
+                    }, {
+                      "name": "ROLE_PREFIX",
+                      "value": "${RolePrefix}"
+                    }, {
+                      "name": "BUCKET_PREFIX",
+                      "value": "${BucketPrefix}"
+                    }, {
+                      "name": "STACK_PREFIX",
+                      "value": "${StackPrefix}"
+                    }, {
+                      "name": "RESOURCE_PREFIX",
+                      "value": "${ResourcePrefix}"
+                    }, {
+                      "name": "STAGE",
+                      "value": "${Stage2}"
+                    }]
+          - !Ref AWS::NoValue
+
+  UnitTestProject:
+    Type: AWS::CodeBuild::Project
+    Properties:
+      Name: !Sub ${ResourcePrefix}-unit-test
+      Artifacts:
+        Type: CODEPIPELINE
+      Source:
+        Type: CODEPIPELINE
+        BuildSpec: ci/buildspec/buildspec.unittest.yml
+      Environment:
+        ComputeType: BUILD_GENERAL1_SMALL
+        Type: LINUX_CONTAINER
+        Image: !Ref BuildImageName
+      ServiceRole: !GetAtt PipelineServiceRole.Arn
+      EncryptionKey: !Sub alias/${ResourcePrefix}-artifact-bucket
+
+  BuildProject:
+    Type: AWS::CodeBuild::Project
+    Properties:
+      Name: !Sub ${ResourcePrefix}-build
+      Artifacts:
+        Type: CODEPIPELINE
+      Source:
+        Type: CODEPIPELINE
+        BuildSpec: ci/buildspec/buildspec.build.yml
+      Environment:
+        ComputeType: BUILD_GENERAL1_SMALL
+        Type: LINUX_CONTAINER
+        Image: !Ref BuildImageName
+      ServiceRole: !GetAtt PipelineServiceRole.Arn
+      EncryptionKey: !Sub alias/${ResourcePrefix}-artifact-bucket
+
+  IntegrationTestProject:
+    Type: AWS::CodeBuild::Project
+    Properties:
+      Name: !Sub ${ResourcePrefix}-integration-test
+      Artifacts:
+        Type: CODEPIPELINE
+      Source:
+        Type: CODEPIPELINE
+        BuildSpec: ci/buildspec/buildspec.integration.yml
+      Environment:
+        ComputeType: BUILD_GENERAL1_SMALL
+        Type: LINUX_CONTAINER
+        Image: !Ref BuildImageName
+      ServiceRole: !GetAtt PipelineServiceRole.Arn
+      EncryptionKey: !Sub alias/${ResourcePrefix}-artifact-bucket
+
+  PostDeployProject:
+    Type: AWS::CodeBuild::Project
+    Properties:
+      Name: !Sub ${ResourcePrefix}-post-deploy
+      Artifacts:
+        Type: CODEPIPELINE
+      Source:
+        Type: CODEPIPELINE
+        BuildSpec: ci/buildspec/buildspec.postdeploy.yml
+      Environment:
+        ComputeType: BUILD_GENERAL1_SMALL
+        Type: LINUX_CONTAINER
+        Image: !Ref BuildImageName
+      ServiceRole: !GetAtt PipelineServiceRole.Arn
+      EncryptionKey: !Sub alias/${ResourcePrefix}-artifact-bucket

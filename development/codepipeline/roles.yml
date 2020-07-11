@@ -1,0 +1,134 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Antiope Scorecards CI/CD Access and Execution Roles
+
+
+Parameters:
+  RolePrefix:
+    Type: String
+    Description: The prefix for the name of the IAM role resources
+    Default: antiope-scorecards
+  BucketPrefix:
+    Type: String
+    Description: The prefix for S3 bucket names
+    Default: antiope-scorecards
+
+
+Resources:
+  DeployCloudFormationRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub ${RolePrefix}-ci-deploy-cfn
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              AWS: !Sub arn:aws:iam::${AWS::AccountId}:root
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: DeployCloudFormationAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Resource: '*'
+                Effect: Allow
+                Action: cloudformation:*
+              - Resource: '*'
+                Effect: Allow
+                Action: s3:GetObject
+              - Resource: !Sub arn:aws:kms:${AWS::Region}:${AWS::AccountId}:*
+                Effect: Allow
+                Action: kms:Decrypt
+              - Resource: !GetAtt CloudFormationRole.Arn
+                Effect: Allow
+                Action: iam:PassRole
+              - Resource: '*'
+                Effect: Allow
+                Action:
+                  - kms:Encrypt
+                  - kms:Decrypt
+                  - kms:ReEncrypt*
+                  - kms:GenerateDataKey*
+                  - kms:DescribeKey
+                  - sns:Publish
+                  - ssm:GetParameter
+
+  IntegrationTestRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub ${RolePrefix}-ci-integration-test
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              AWS: !Sub arn:aws:iam::${AWS::AccountId}:root
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: IntegrationTestAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: IntegrationTestAccess
+                Effect: Allow
+                Resource: '*'
+                Action:
+                  - ssm:GetParameter
+                  - cognito-idp:AdminConfirmSignUp
+                  - cognito-idp:SignUp
+                  - cognito-idp:AdminDeleteUser
+                  - dynamodb:BatchGetItem
+                  - dynamodb:BatchWriteItem
+                  - dynamodb:GetItem
+                  - dynamodb:PutItem
+                  - dynamodb:DeleteItem
+                  - dynamodb:UpdateItem
+                  - dynamodb:Scan
+
+  PostDeployRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub ${RolePrefix}-ci-post-deploy
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              AWS: !Sub arn:aws:iam::${AWS::AccountId}:root
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: PostDeployAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: PostDeployPermissions
+                Effect: Allow
+                Resource: '*'
+                Action:
+                  - ssm:GetParameter
+                  - amplify:*
+              - Sid: UploadCode
+                Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:GetObjectAcl
+                  - s3:GetObjectVersion
+                  - s3:PutObject
+                  - s3:PutObjectAcl
+                Resource:
+                  - !Sub arn:${AWS::Partition}:s3:::${BucketPrefix}-upload-${AWS::AccountId}
+                  - !Sub arn:${AWS::Partition}:s3:::${BucketPrefix}-upload-${AWS::AccountId}/*
+
+  CloudFormationRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub ${RolePrefix}-ci-cloudformation
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: cloudformation.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AdministratorAccess

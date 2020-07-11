@@ -1,0 +1,122 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Antiope Scorecards CI/CD Artifact Buckets
+
+
+Parameters:
+  BucketPrefix:
+    Type: String
+    Description: The prefix for S3 bucket names
+    Default: antiope-scorecards
+  ResourcePrefix:
+    Type: String
+    Description: The prefix for misc resource names
+    Default: antiope-scorecards
+
+
+Resources:
+  ArtifactBucketKey:
+    Type: AWS::KMS::Key
+    Properties:
+      Description: Code & Deployment Artifact Key
+      EnableKeyRotation: true
+      KeyPolicy:
+        Version: '2012-10-17'
+        Id: !Ref AWS::StackName
+        Statement:
+          - Sid: Allows admin of the key
+            Effect: Allow
+            Action: '*'
+            Resource: '*'
+            Principal:
+              AWS: !Sub arn:aws:iam::${AWS::AccountId}:root
+          - Sid: Allow use of the key for CodePipeline
+            Effect: Allow
+            Action:
+              - kms:Encrypt
+              - kms:Decrypt
+              - kms:ReEncrypt*
+              - kms:GenerateDataKey*
+              - kms:DescribeKey
+            Resource: '*'
+            Principal:
+              AWS: !Sub arn:aws:iam::${AWS::AccountId}:root
+
+  ArtifactBucketAlias:
+    Type: AWS::KMS::Alias
+    Properties:
+      AliasName: !Sub alias/${ResourcePrefix}-artifact-bucket
+      TargetKeyId: !Ref ArtifactBucketKey
+
+  CloudFormationArtifactBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub ${BucketPrefix}-cfn-artifacts-${AWS::AccountId}-${AWS::Region}
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: True
+        BlockPublicPolicy: True
+        IgnorePublicAcls: True
+        RestrictPublicBuckets: True
+
+  CloudFormationArtifactBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref CloudFormationArtifactBucket
+      PolicyDocument:
+        Statement:
+          - Action: s3:*
+            Effect: Allow
+            Resource:
+              - !Sub ${CloudFormationArtifactBucket.Arn}
+              - !Sub ${CloudFormationArtifactBucket.Arn}/*
+            Principal:
+              AWS: !Sub arn:aws:iam::${AWS::AccountId}:root
+          - Action:
+              - s3:GetObject
+              - s3:ListBucket
+            Effect: Allow
+            Resource:
+              - !Sub ${CloudFormationArtifactBucket.Arn}
+              - !Sub ${CloudFormationArtifactBucket.Arn}/*
+            Principal:
+              AWS: !Sub arn:aws:iam::${AWS::AccountId}:root
+
+  CIArtifactBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub ${BucketPrefix}-ci-artifacts-${AWS::AccountId}-${AWS::Region}
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: True
+        BlockPublicPolicy: True
+        IgnorePublicAcls: True
+        RestrictPublicBuckets: True
+
+  CIArtifactBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref CIArtifactBucket
+      PolicyDocument:
+        Statement:
+          - Action: s3:*
+            Effect: Allow
+            Resource:
+              - !Sub ${CIArtifactBucket.Arn}
+              - !Sub ${CIArtifactBucket.Arn}/*
+            Principal:
+              AWS: !Sub arn:aws:iam::${AWS::AccountId}:root
+          - Action:
+              - s3:GetObject
+              - s3:ListBucket
+            Effect: Allow
+            Resource:
+              - !Sub arn:aws:s3:::${CIArtifactBucket}
+              - !Sub arn:aws:s3:::${CIArtifactBucket}/*
+            Principal:
+              AWS: !Sub arn:aws:iam::${AWS::AccountId}:root

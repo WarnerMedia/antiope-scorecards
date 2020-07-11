@@ -1,0 +1,17 @@
+version: 0.2
+phases:
+  install:
+    runtime-versions:
+      python: 3.8
+    commands:
+      - echo "Installing dependencies"
+  build:
+    commands:
+      - set -euxo pipefail
+      - echo "Packaging CF Templates"
+      - pip install -r requirements-dev.txt
+      - make package
+artifacts:
+  files:
+    - templates/main.*.packaged.yml
+    - config/*.json

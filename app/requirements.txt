@@ -1,0 +1,6 @@
+boto3
+elasticsearch6
+elasticsearch6_dsl
+openpyxl
+PyYAML
+requests_aws4auth

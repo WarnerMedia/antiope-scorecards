@@ -1,0 +1,1163 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: Antiope Scorecards Backend API
+
+
+Parameters:
+  Stage:
+    Type: String
+  ResourcePrefix:
+    Type: String
+    Description: The prefix for misc resource names
+    Default: antiope-scorecards
+  Domain:
+    Type: String
+    Default: ''
+  CertArn:
+    Type: String
+  CognitoUserPoolArn:
+    Type: String
+  UsersTable:
+    Type: String
+  ConfigTable:
+    Type: String
+  AccountsTable:
+    Type: String
+  RequirementsTable:
+    Type: String
+  NCRTable:
+    Type: String
+  ExclusionsResourcesTable:
+    Type: String
+  ScoresTable:
+    Type: String
+  AccountScoresTable:
+    Type: String
+  ScansTable:
+    Type: String
+  AuditTable:
+    Type: String
+  ScorecardBucket:
+    Type: String
+  ScorecardPrefix:
+    Type: String
+  RemediationRoleName:
+    Type: String
+  EsEndpoint:
+    Type: String
+  EsRegion:
+    Type: String
+
+
+Conditions:
+  CreateDomain: !Not [ !Equals [ !Ref Domain, '' ] ]
+  IsProd: !Equals [ !Ref Stage, prod ]
+
+
+Globals:
+  Function:
+    Runtime: python3.8
+    MemorySize: 1536
+    Timeout: 10
+    Environment:
+      Variables:
+        STAGE: !Ref Stage
+        USERS_TABLE: !Ref UsersTable
+        CONFIG_TABLE: !Ref ConfigTable
+        ACCOUNTS_TABLE: !Ref AccountsTable
+        REQUIREMENTS_TABLE: !Ref RequirementsTable
+        NCR_TABLE: !Ref NCRTable
+        EXCLUSIONS_TABLE: !Ref ExclusionsResourcesTable
+        SCORES_TABLE: !Ref ScoresTable
+        ACCOUNT_SCORES_TABLE: !Ref AccountScoresTable
+        SCANS_TABLE: !Ref ScansTable
+        AUDIT_TABLE: !Ref AuditTable
+        SCORECARD_BUCKET: !Ref ScorecardBucket
+        SCORECARD_PREFIX: !Ref ScorecardPrefix
+        LOG_LEVEL: !If [ IsProd, INFO, DEBUG ]
+        SNS_ARN: !Ref RemediationSnsTopic
+        REMEDIATION_ROLE_NAME: !Ref RemediationRoleName
+        ES_ENDPOINT: !Ref EsEndpoint
+        ES_REGION: !Ref EsRegion
+        WORKER_PREFIX: !Sub ${ResourcePrefix}-${Stage}-remediation-
+
+Resources:
+  RemediationSnsTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: !Sub ${ResourcePrefix}-${Stage}-api-remediation
+  LambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+        - arn:aws:iam::aws:policy/AWSXrayWriteOnlyAccess
+      Policies:
+        - PolicyName: AccessResources
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: AccessToDynamodb
+                Effect: Allow
+                Action:
+                  - dynamodb:*Item
+                  - dynamodb:Query
+                  - dynamodb:Scan
+                Resource:
+                  - !Sub arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${UsersTable}*
+                  - !Sub arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${ConfigTable}*
+                  - !Sub arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${AccountsTable}*
+                  - !Sub arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${RequirementsTable}*
+                  - !Sub arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${NCRTable}*
+                  - !Sub arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${ExclusionsResourcesTable}*
+                  - !Sub arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${ScoresTable}*
+                  - !Sub arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${AccountScoresTable}*
+                  - !Sub arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${ScansTable}*
+                  - !Sub arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${AuditTable}*
+              - Sid: ReadAccessForS3
+                Effect: Allow
+                Action:
+                  - s3:GetObject
+                Resource:
+                  - !Sub arn:aws:s3:::${ScorecardBucket}/${ScorecardPrefix}/*
+              - Sid: ElasticSearchReadAccess
+                Effect: Allow
+                Action:
+                  - es:ESHttpGet
+                Resource: '*'
+              - Sid: RemediationWorkerInvocation
+                Effect: Allow
+                Action:
+                  - lambda:InvokeFunction
+                Resource:
+                  - !Sub arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:${ResourcePrefix}-${Stage}-remediation-*
+              - Sid: StsAssumeRole
+                Effect: Allow
+                Action:
+                  - sts:AssumeRole
+                Resource:
+                  - '*' # for remediation role checks
+              - Sid: PublishToSns
+                Effect: Allow
+                Action:
+                  - sns:Publish
+                Resource:
+                  - !Ref RemediationSnsTopic
+
+
+  ApiServiceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: apigateway.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonAPIGatewayPushToCloudWatchLogs
+      Policies:
+        - PolicyName: !Sub API_Service_Role_Policy_${Stage}
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Action: lambda:InvokeFunction
+                Effect: Allow
+                Resource: !Sub arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:*
+
+  GetDocumentation:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub ${ResourcePrefix}-${Stage}-api-GetDocumentation
+      Handler: api.documentation.documentation_handler
+      CodeUri: ../build
+      Role: !GetAtt LambdaRole.Arn
+
+  GetUserStatus:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub ${ResourcePrefix}-${Stage}-api-GetUserStatus
+      Handler: api.user_status.user_status_handler
+      CodeUri: ../build
+      Role: !GetAtt LambdaRole.Arn
+
+  GetAccountSummary:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub ${ResourcePrefix}-${Stage}-api-GetAccountSummary
+      Handler: api.account_summary.account_summary_handler
+      CodeUri: ../build
+      Role: !GetAtt LambdaRole.Arn
+
+  GetAccountDetailedScores:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub ${ResourcePrefix}-${Stage}-api-GetAccountScores
+      Handler: api.account_detailed_scores.account_detailed_scores_handler
+      CodeUri: ../build
+      Role: !GetAtt LambdaRole.Arn
+
+  GetNCR:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub ${ResourcePrefix}-${Stage}-api-GetNCR
+      Handler: api.ncr.ncr_handler
+      CodeUri: ../build
+      Role: !GetAtt LambdaRole.Arn
+
+  GetTags:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub ${ResourcePrefix}-${Stage}-api-GetTags
+      Handler: api.tags.tags_handler
+      CodeUri: ../build
+      Role: !GetAtt LambdaRole.Arn
+
+  GetExclusions:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub ${ResourcePrefix}-${Stage}-api-GetExclusions
+      Handler: api.exclusions.get_exclusions_handler
+      CodeUri: ../build
+      Role: !GetAtt LambdaRole.Arn
+
+  PutExclusions:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub ${ResourcePrefix}-${Stage}-api-PutExclusions
+      Handler: api.exclusions.put_exclusions_handler
+      CodeUri: ../build
+      Role: !GetAtt LambdaRole.Arn
+
+  PutExclusionsForUser:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub ${ResourcePrefix}-${Stage}-api-PutExclusionsForUser
+      Handler: api.exclusions.put_exclusions_for_user_handler
+      CodeUri: ../build
+      Role: !GetAtt LambdaRole.Arn
+
+  PostRemediate:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub ${ResourcePrefix}-${Stage}-api-Remediate
+      Handler: api.remediate.remediate_manager_handler
+      CodeUri: ../build
+      Role: !GetAtt LambdaRole.Arn
+
+
+  Dashboard:
+    Type: "AWS::CloudWatch::Dashboard"
+    Properties:
+      DashboardName: !Sub ${ResourcePrefix}-${Stage}-api
+      DashboardBody: !Sub |-
+        {
+          "widgets": [
+            {
+              "type": "metric",
+              "x": 0,
+              "y": 0,
+              "width": 15,
+              "height": 6,
+              "properties": {
+                "view": "singleValue",
+                "metrics": [
+                  [ "AWS/Lambda", "Invocations", "FunctionName", "${GetDocumentation}", { "stat": "Sum", "period": 604800, "label": "GetDocumentation"} ],
+                  [ "AWS/Lambda", "Invocations", "FunctionName", "${GetUserStatus}", { "stat": "Sum", "period": 604800, "label": "GetUserStatus"} ],
+                  [ "AWS/Lambda", "Invocations", "FunctionName", "${GetAccountSummary}", { "stat": "Sum", "period": 604800, "label": "GetAccountSummary"} ],
+                  [ "AWS/Lambda", "Invocations", "FunctionName", "${GetAccountDetailedScores}", { "stat": "Sum", "period": 604800, "label": "GetAccountDetailedScores"} ],
+                  [ "AWS/Lambda", "Invocations", "FunctionName", "${GetNCR}", { "stat": "Sum", "period": 604800, "label": "GetNCR"} ],
+                  [ "AWS/Lambda", "Invocations", "FunctionName", "${GetTags}", { "stat": "Sum", "period": 604800, "label": "GetTags"} ],
+                  [ "AWS/Lambda", "Invocations", "FunctionName", "${GetExclusions}", { "stat": "Sum", "period": 604800, "label": "GetExclusions"} ],
+                  [ "AWS/Lambda", "Invocations", "FunctionName", "${PutExclusions}", { "stat": "Sum", "period": 604800, "label": "PutExclusions"} ],
+                  [ "AWS/Lambda", "Invocations", "FunctionName", "${PutExclusionsForUser}", { "stat": "Sum", "period": 604800, "label": "PutExclusionsForUser"} ],
+                  [ "AWS/Lambda", "Invocations", "FunctionName", "${PostRemediate}", { "stat": "Sum", "period": 604800, "label": "PostRemediate"} ]
+                ],
+                "region": "${AWS::Region}",
+                "title": "Lambda Invocation",
+                "period": 300
+              }
+            },
+            {
+              "type": "metric",
+              "x": 0,
+              "y": 6,
+              "width": 15,
+              "height": 6,
+              "properties": {
+                "view": "singleValue",
+                "metrics": [
+                  [ "AWS/Lambda", "Errors", "FunctionName", "${GetDocumentation}", { "stat": "Sum", "period": 604800, "label": "GetDocumentation"} ],
+                  [ "AWS/Lambda", "Errors", "FunctionName", "${GetUserStatus}", { "stat": "Sum", "period": 604800, "label": "GetUserStatus"} ],
+                  [ "AWS/Lambda", "Errors", "FunctionName", "${GetAccountSummary}", { "stat": "Sum", "period": 604800, "label": "GetAccountSummary"} ],
+                  [ "AWS/Lambda", "Errors", "FunctionName", "${GetAccountDetailedScores}", { "stat": "Sum", "period": 604800, "label": "GetAccountDetailedScores"} ],
+                  [ "AWS/Lambda", "Errors", "FunctionName", "${GetNCR}", { "stat": "Sum", "period": 604800, "label": "GetNCR"} ],
+                  [ "AWS/Lambda", "Errors", "FunctionName", "${GetTags}", { "stat": "Sum", "period": 604800, "label": "GetTags"} ],
+                  [ "AWS/Lambda", "Errors", "FunctionName", "${GetExclusions}", { "stat": "Sum", "period": 604800, "label": "GetExclusions"} ],
+                  [ "AWS/Lambda", "Errors", "FunctionName", "${PutExclusions}", { "stat": "Sum", "period": 604800, "label": "PutExclusions"} ],
+                  [ "AWS/Lambda", "Errors", "FunctionName", "${PutExclusionsForUser}", { "stat": "Sum", "period": 604800, "label": "PutExclusionsForUser"} ],
+                  [ "AWS/Lambda", "Errors", "FunctionName", "${PostRemediate}", { "stat": "Sum", "period": 604800, "label": "PostRemediate"} ]
+                ],
+                "region": "${AWS::Region}",
+                "title": "Lambda Errors",
+                "period": 300
+              }
+            },
+            {
+              "type": "metric",
+              "x": 0,
+              "y": 12,
+              "width": 15,
+              "height": 6,
+              "properties": {
+                "view": "singleValue",
+                "metrics": [
+                  [ "AWS/Lambda", "Duration", "FunctionName", "${GetDocumentation}", { "stat": "Average", "period": 604800, "label": "GetDocumentation"} ],
+                  [ "AWS/Lambda", "Duration", "FunctionName", "${GetUserStatus}", { "stat": "Average", "period": 604800, "label": "GetUserStatus"} ],
+                  [ "AWS/Lambda", "Duration", "FunctionName", "${GetAccountSummary}", { "stat": "Average", "period": 604800, "label": "GetAccountSummary"} ],
+                  [ "AWS/Lambda", "Duration", "FunctionName", "${GetAccountDetailedScores}", { "stat": "Average", "period": 604800, "label": "GetAccountDetailedScores"} ],
+                  [ "AWS/Lambda", "Duration", "FunctionName", "${GetNCR}", { "stat": "Average", "period": 604800, "label": "GetNCR"} ],
+                  [ "AWS/Lambda", "Duration", "FunctionName", "${GetTags}", { "stat": "Average", "period": 604800, "label": "GetTags"} ],
+                  [ "AWS/Lambda", "Duration", "FunctionName", "${GetExclusions}", { "stat": "Average", "period": 604800, "label": "GetExclusions"} ],
+                  [ "AWS/Lambda", "Duration", "FunctionName", "${PutExclusions}", { "stat": "Average", "period": 604800, "label": "PutExclusions"} ],
+                  [ "AWS/Lambda", "Duration", "FunctionName", "${PutExclusionsForUser}", { "stat": "Average", "period": 604800, "label": "PutExclusionsForUser"} ],
+                  [ "AWS/Lambda", "Duration", "FunctionName", "${PostRemediate}", { "stat": "Average", "period": 604800, "label": "PostRemediate"} ]
+                ],
+                "region": "${AWS::Region}",
+                "title": "Lambda Duration",
+                "period": 300
+              }
+            }
+          ]
+        }
+
+  ApiBasePathMapping:
+    Type: AWS::ApiGateway::BasePathMapping
+    Condition: CreateDomain
+    Properties:
+      DomainName: !Ref ApiDomainName
+      RestApiId: !Ref Api
+      Stage: !Ref Api.Stage
+
+  ApiDomainName:
+    Type: AWS::ApiGateway::DomainName
+    Condition: CreateDomain
+    Properties:
+      DomainName: !Ref Domain
+      RegionalCertificateArn: !Ref CertArn
+      EndpointConfiguration:
+        Types:
+          - REGIONAL
+
+  Api:
+    Type: AWS::Serverless::Api
+    Properties:
+      OpenApiVersion: '3.0.1'
+      MinimumCompressionSize: 8192
+      StageName: !Ref Stage
+      Cors:
+        AllowMethods: "'*'"
+        AllowHeaders: "'*'"
+        AllowOrigin: "'*'"
+      GatewayResponses:
+        DEFAULT_4xx:
+          ResponseParameters:
+            Headers:
+              Access-Control-Allow-Headers: "'*'"
+              Access-Control-Allow-Origin: "'*'"
+              Access-Control-Allow-Methods: "'*'"
+        DEFAULT_5xx:
+          ResponseParameters:
+            Headers:
+              Access-Control-Allow-Headers: "'*'"
+              Access-Control-Allow-Origin: "'*'"
+              Access-Control-Allow-Methods: "'*'"
+      EndpointConfiguration: REGIONAL
+      Name: !Sub ${ResourcePrefix}-api-${Stage}
+      DefinitionBody:
+        openapi: 3.0.0
+        info:
+          title: Antiope Scorecards API
+          version: 1.0.0
+          description: Antiope Scorecards assists in the remediation of non-compliant AWS resources (NCRs) via providing a scalable and reliable system for automated viewing of NCRs, the justification for their NCR status, triggers for remediation of certain NCRs, and management of NCR exclusions.
+        paths:
+          /docs:
+            get:
+              operationId: getDocumentation
+              description: Get documentaiton
+              security:
+                - CognitoAuth: [] # default authorization
+              x-amazon-apigateway-integration:
+                uri: !Sub arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${GetDocumentation.Arn}/invocations
+                credentials: !GetAtt ApiServiceRole.Arn
+                responses: {}
+                httpMethod: POST
+                type: aws_proxy
+              responses:
+                '200':
+                  description: html rendering of the API documentation
+                  content:
+                    text/html:
+                      schema:
+                        $ref: '#/components/schemas/documentation'
+                '400':
+                  $ref: '#/components/responses/invalid'
+                '404':
+                  $ref: '#/components/responses/notFound'
+                '500':
+                  $ref: '#/components/responses/internalError'
+          /status:
+            get:
+              operationId: getUserStatus
+              description: returns accounts attributes, last scan date/time, and requirements object
+              security:
+                - CognitoAuth: [] # default authorization
+              x-amazon-apigateway-integration:
+                uri: !Sub arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${GetUserStatus.Arn}/invocations
+                credentials: !GetAtt ApiServiceRole.Arn
+                responses: {}
+                httpMethod: POST
+                type: aws_proxy
+              responses:
+                '200':
+                  description: Successful response
+                  content:
+                    application/json:
+                      schema:
+                        $ref: '#/components/schemas/userStatus'
+                '400':
+                  description: bad request
+          /accounts/{accountIds}/summary:
+            get:
+              operationId: getAccountSummary
+              description: used to populate the user landing page
+              security:
+                - CognitoAuth: [] # default authorization
+              x-amazon-apigateway-integration:
+                uri: !Sub arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${GetAccountSummary.Arn}/invocations
+                credentials: !GetAtt ApiServiceRole.Arn
+                responses: {}
+                httpMethod: POST
+                type: aws_proxy
+              parameters:
+                - in: path
+                  name: accountIds
+                  description: string of comma-separated account ids
+                  required: true
+                  schema:
+                    type: string
+              responses:
+                '200':
+                  description: successful response
+                  content:
+                    application/json:
+                      schema:
+                        $ref: '#/components/schemas/accountSummary'
+                '400':
+                  description: bad request
+          /accounts/{accountIds}/detailedScore:
+            get:
+              operationId: getAccountDetailedScores
+              description: gets the scores for all requirements in one or many accounts
+              security:
+                - CognitoAuth: [] # default authorization
+              x-amazon-apigateway-integration:
+                uri: !Sub arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${GetAccountDetailedScores.Arn}/invocations
+                credentials: !GetAtt ApiServiceRole.Arn
+                responses: {}
+                httpMethod: POST
+                type: aws_proxy
+              parameters:
+                - in: path
+                  name: accountIds
+                  description: string of comma-separated account ids
+                  required: true
+                  schema:
+                    type: string
+              responses:
+                '200':
+                  description: successful response
+                  content:
+                    application/json:
+                      schema:
+                        $ref: '#/components/schemas/detailedScore'
+                '400':
+                  description: bad request
+          /ncr:
+            get:
+              operationId: getNCR
+              description: this is used to populate the non-compliant resource view
+              security:
+                - CognitoAuth: [] # default authorization
+              x-amazon-apigateway-integration:
+                uri: !Sub arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${GetNCR.Arn}/invocations
+                credentials: !GetAtt ApiServiceRole.Arn
+                responses: {}
+                httpMethod: POST
+                type: aws_proxy
+              parameters:
+                - in: query
+                  name: accountId
+                  schema:
+                    type: array # multiple IDs can be specified
+                    items:
+                      type: string
+                  description: account IDs to get the non-compliant resources for. Multiple account IDs can be specified.
+                - in: query
+                  name: requirementId
+                  schema:
+                    type: string
+              responses:
+                '200':
+                  description: successful response
+                  content:
+                    application/json:
+                      schema:
+                        $ref: '#/components/schemas/ncrList'
+                '400':
+                  description: bad request
+          /ncr/{ncrId}/tags:
+            get:
+              operationId: getTags
+              description: Get AWS tags for NCR resource from Inventory database
+              security:
+                - CognitoAuth: [] # default authorization
+              x-amazon-apigateway-integration:
+                uri: !Sub arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${GetTags.Arn}/invocations
+                credentials: !GetAtt ApiServiceRole.Arn
+                responses: {}
+                httpMethod: POST
+                type: aws_proxy
+              parameters:
+                - in: path
+                  name: ncrId
+                  description: ncrId to fetch tags for
+                  required: true
+                  schema:
+                    type: string
+              responses:
+                '200':
+                  description: successful response
+                  content:
+                    application/json:
+                      schema:
+                        $ref: '#/components/schemas/tags'
+                '400':
+                  description: bad request
+          /exclusions:
+            get:
+              operationId: getExclusions
+              description:  All exclusions in the exclusions table. Each exclusion will have filtering attributes added to help the frontend filter based on exclusions that need Admin action.
+              security:
+                - CognitoAuth: [] # default authorization
+              x-amazon-apigateway-integration:
+                uri: !Sub arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${GetExclusions.Arn}/invocations
+                credentials: !GetAtt ApiServiceRole.Arn
+                responses: {}
+                httpMethod: POST
+                type: aws_proxy
+              parameters:
+                - in: query
+                  name: nextToken
+                  schema:
+                    type: string
+                  description: the next token for pagination
+                - in: query
+                  name: limit
+                  schema:
+                    type: string
+                  description: limit the number of exclusions returned
+              responses:
+                '200':
+                  description: successful response
+                  content:
+                    application/json:
+                      schema:
+                        $ref: '#/components/schemas/exclusionsGetResponseBody'
+                '400':
+                  description: bad request
+                '403':
+                  description: User is user, but not admin.
+            put:
+              operationId: putExclusions
+              description: This endpoint will handle updates to existing exclusions and new exclusions.
+              summary: Don't pass in exclusionId for new exclusions.
+              security:
+                - CognitoAuth: [] # default authorization
+              x-amazon-apigateway-integration:
+                uri: !Sub arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${PutExclusions.Arn}/invocations
+                credentials: !GetAtt ApiServiceRole.Arn
+                responses: {}
+                httpMethod: POST
+                type: aws_proxy
+              requestBody:
+                required: true
+                content:
+                  application/json:
+                    schema:
+                      $ref: '#/components/schemas/exclusionsAdminPutRequestBody'
+              responses:
+                '200':
+                  description: successful response
+                  content:
+                    application/json:
+                      schema:
+                        $ref: '#/components/schemas/exclusionsPutResponseBody'
+                '400':
+                  description: bad request
+                '403':
+                  description: User is user, but not admin.
+          /exclusions/user:
+            put:
+              operationId: putExclusionsForUser
+              security:
+                - CognitoAuth: [] # default authorization
+              x-amazon-apigateway-integration:
+                uri: !Sub arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${PutExclusionsForUser.Arn}/invocations
+                credentials: !GetAtt ApiServiceRole.Arn
+                responses: {}
+                httpMethod: POST
+                type: aws_proxy
+              requestBody:
+                required: true
+                content:
+                  application/json:
+                    schema:
+                      $ref: '#/components/schemas/exclusionsUserPutRequestBody'
+              responses:
+                '200':
+                  description: successful response
+                  content:
+                    application/json:
+                      schema:
+                        $ref: '#/components/schemas/exclusionsUserPutResponseBody'
+                '400':
+                  description: bad request
+          /remediate:
+            post:
+              operationId: postRemediate
+              security:
+                - CognitoAuth: [] # default authorization
+              x-amazon-apigateway-integration:
+                uri: !Sub arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${PostRemediate.Arn}/invocations
+                credentials: !GetAtt ApiServiceRole.Arn
+                responses: {}
+                httpMethod: POST
+                type: aws_proxy
+              requestBody:
+                required: true
+                content:
+                  application/json:
+                    schema:
+                      $ref: '#/components/schemas/remediatePostRequestbody'
+              responses:
+                '200':
+                  description: successful response
+                  content:
+                    application/json:
+                      schema:
+                        $ref: '#/components/schemas/remediatePostReturnSuccess'
+                '400':
+                  description: bad request
+                  content:
+                    application/json:
+                      schema:
+                        $ref: '#/components/schemas/remediatePostReturnError'
+        components:
+          responses:
+            notFound:
+              description: The specified resource was not found
+              content:
+                application/json:
+                  schema:
+                    $ref: '#/components/schemas/error'
+            invalid:
+              description: The request was malformed or invalid
+              content:
+                application/json:
+                  schema:
+                    $ref: '#/components/schemas/error'
+            internalError:
+              description: Internal Server Error
+              content:
+                application/json:
+                  schema:
+                    $ref: '#/components/schemas/error'
+          schemas:
+            documentation:
+              type: string
+            remediatePostRequestbody:
+              type: object
+              properties:
+                ncrId:
+                  type: string
+                remediationParameters:
+                  type: object
+                overrideIacWarning:
+                  type: boolean
+            remediatePostReturnSuccess:
+              type: object
+              properties:
+                status:
+                  type: string
+                message:
+                  type: string
+                updatedNcr:
+                  $ref: '#/components/schemas/ncrObject'
+            remediatePostReturnError:
+              type: object
+              properties:
+                status:
+                  type: string
+                message:
+                  type: string
+            exclusionsAdminPutRequestBody:
+              type: object
+              properties:
+                exclusionId:
+                  type: string
+                exclusion:
+                  type: object
+                  properties:
+                    status:
+                      type: string
+                    accountId:
+                      type: string
+                    requirementId:
+                      type: string
+                    resourceId:
+                      type: string
+                    expirationDate:
+                      type: string
+                      format: date-time
+                    formFields:
+                      type: object
+                    updateRequested:
+                      type: object
+                      properties:
+                        expirationDate:
+                          type: string
+                          format: date-time
+                        formFields:
+                          type: object
+                    adminComments:
+                      type: string
+                    hidesResources:
+                      type: boolean
+            exclusionsUserPutRequestBody:
+              type: object
+              properties:
+                ncrId:
+                  type: string
+                exclusion:
+                  type: object
+                  properties:
+                    status:
+                      type: string
+                    expirationDate:
+                      type: string
+                      format: date-time
+                    formFields:
+                      type: object
+                    updateRequested:
+                      type: object
+                      properties:
+                        expirationDate:
+                          type: string
+                          format: date-time
+                        formFields:
+                          type: object
+            exclusionsPutResponseBody:
+              type: object
+              properties:
+                newExclusion:
+                  $ref: '#/components/schemas/exclusionObject'
+                deleteExclusion:
+                  $ref: '#/components/schemas/exclusionObject'
+            exclusionsUserPutResponseBody:
+              type: object
+              properties:
+                newExclusion:
+                  $ref: '#/components/schemas/exclusionObject'
+                newNcr:
+                  $ref: '#/components/schemas/ncrObject'
+            exclusionsGetResponseBody:
+              type: object
+              properties:
+                exclusions:
+                  type: array
+                  items:
+                    $ref: '#/components/schemas/exclusionObject'
+                nextToken:
+                  type: string
+                limit:
+                  type: number
+            exclusionObject:
+              type: object
+              properties:
+                exclusionId:
+                  type: string
+                accountId:
+                  type: string
+                adminComments:
+                  type: string
+                expirationDate:
+                  type: string
+                  format: date-time
+                formFields:
+                  type: object
+                hidesResources:
+                  type: boolean
+                lastModifiedByAdmin:
+                  type: string
+                lastModifiedByUser:
+                  type: string
+                lastStatusChangeDate:
+                  type: string
+                  format: date-time
+                requirementId:
+                  type: string
+                resourceId:
+                  type: string
+                rqrmntId_rsrceRegex:
+                  type: string
+                status:
+                  type: string
+                type:
+                  type: string
+                updateRequested:
+                  type: object
+                  properties:
+                    expirationDate:
+                      type: string
+                    formFields:
+                      type: object
+            tags:
+              type: object
+              properties:
+                ncrTags:
+                  type: object
+                  properties:
+                    ncrId:
+                      type: string
+                    tags:
+                      type: array
+                      items:
+                        type: object
+                        properties:
+                          name:
+                            type: string
+                          value:
+                            type: string
+            ncrList:
+              type: object
+              properties:
+                ncrRecords:
+                  type: array
+                  items:
+                    $ref: '#/components/schemas/ncrObject'
+            ncrObject:
+              type: object
+              properties:
+                ncrId:
+                  type: string
+                resource:
+                  type: object
+                  properties:
+                    accountId:
+                      type: string
+                    accountName:
+                      type: string
+                    requirementId:
+                      type: string
+                    resourceId:
+                      type: string
+                    resourceType:
+                      type: string
+                    region:
+                      type: string
+                    reason:
+                      type: string
+                    isHidden:
+                      type: boolean
+                    remediated:
+                      type: string
+                    exclusionApplied:
+                      type: boolean
+                    exclusion:
+                      type: object
+                      properties:
+                        updateExclusionReason:
+                          type: boolean
+                        requestExclusion:
+                          type: boolean
+                        addJustificiaton:
+                          type: boolean
+                        requestExclusionExtension:
+                          type: boolean
+                        remediate:
+                          type: boolean
+                allowedActions:
+                  type: object
+                  properties:
+                    requestExclusion:
+                      type: boolean
+                    requestExclusionChange:
+                      type: boolean
+                    remediate:
+                      type: boolean
+            detailedScore:
+              type: object
+              properties:
+                accounts:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      accountId:
+                        type: string
+                      requirementsScores:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            requirementsId:
+                              type: string
+                            score:
+                              type: object
+                              properties:
+                                weight:
+                                  type: number
+                                score:
+                                  type: number
+            accountSummary:
+              type: object
+              properties:
+                accounts:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      accountId:
+                        type: string
+                      accountName:
+                        type: string
+                      currentScore:
+                        type: number
+                        nullable: True
+                      criticalCount:
+                        type: number
+                        nullable: True
+                      historicalScores:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            date:
+                              type: string
+                            score:
+                              type: number
+                      spreadsheetDownload:
+                        type: object
+                        properties:
+                          url:
+                            type: string
+            userStatus:
+              type: object
+              properties:
+                isAuthenticated:
+                  type: boolean
+                email:
+                  type: string
+                firstName:
+                  type: string
+                lastName:
+                  type: string
+                scan:
+                  type: object
+                  properties:
+                    lastScanDate:
+                      type: string
+                      format: date-time
+                isAdmin:
+                  type: boolean
+                usersList: # property will be empty array in the event that user is not admin
+                  type: array
+                  items:
+                    $ref: '#/components/schemas/user'
+                accountList:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      accountId:
+                        type: string
+                payerAccounts:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      id:
+                        type: string
+                      accountList:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            accountId:
+                              type: string
+                requirements:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      description:
+                        type: string
+                        example: All IAM Users have MFA enabled for Console Access
+                      source:
+                        type: string
+                        enum: [s3Import, cloudsploit]
+                      severity:
+                        type: string
+                        enum: [critical, high, medium, low, info]
+                      weight:
+                        type: number
+                      requirementId:
+                        type: string
+                      sensitiveAccount:
+                        type: boolean
+                      s3Import:
+                        type: object
+                        description: Mutually exclusive with cloudsploit
+                        properties:
+                          s3Bucket:
+                            type: string
+                          s3Key:
+                            type: string
+                      cloudsploit:
+                        type: object
+                        description: Mutually exclusive with s3Import
+                        properties:
+                          finding:
+                            type: string
+                            description: must match CloudSploit finding name
+                          passFail:
+                            type: boolean
+                          source:
+                            type: string
+                            example: ec2.describeImages
+                          tagKey:
+                            type: string
+                            example: groupId
+                          regional:
+                            type: boolean
+                          ignoreWarning:
+                            type: boolean
+                          ignoreError:
+                            type: boolean
+                exclusionTypes:
+                  type: object
+                  additionalProperties:
+                    type: object
+                    properties:
+                      defaultDurationInDays:
+                        type: number
+                      formFields:
+                        type: object
+                        additionalProperties:
+                          type: object
+                          properties:
+                            label:
+                              type: string
+                            placeholder:
+                              type: string
+                      maxDurationInDays:
+                        type: number
+                      displayname:
+                        type: string
+                      states:
+                        type: object
+                        properties:
+                          archived:
+                            $ref: '#/components/schemas/exclusionState'
+                          approved:
+                            $ref: '#/components/schemas/exclusionState'
+                          initial:
+                            $ref: '#/components/schemas/exclusionState'
+                          rejected:
+                            $ref: '#/components/schemas/exclusionState'
+                severityColors:
+                  type: object
+                  additionalProperties:
+                    type: object
+                    properties:
+                      background:
+                        type: string
+                      text:
+                        type: string
+            exclusionState:
+              type: object
+              properties:
+                effective:
+                  type: boolean
+                displayName:
+                  type: string
+                actionName:
+                  type: string
+            user:
+              type: object
+              properties:
+                email:
+                  type: string
+                firstName:
+                  type: string
+                lastName:
+                  type: string
+                accountList:
+                  type: array
+                  items:
+                    type: string
+            error:
+              type: object
+              properties:
+                statusCode:
+                  type: string
+                  description: Status
+                message:
+                  type: string
+                  description: error message
+          securitySchemes:
+            CognitoAuth:
+              in: header
+              name: Authorization
+              type: apiKey
+              description: Not actually an api-key. Use Cognito JWT.
+              x-amazon-apigateway-authtype: cognito_user_pools
+              x-amazon-apigateway-authorizer:
+                providerARNs:
+                  - !Ref CognitoUserPoolArn
+                type: cognito_user_pools
+
+  SSMDomainName:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Type: String
+      Value: !Sub https://${Api}.execute-api.${AWS::Region}.amazonaws.com/${Stage}
+      Name: !Sub /${ResourcePrefix}/${Stage}/api/domain
+
+
+Outputs:
+  ApiDomain:
+    Condition: CreateDomain
+    Value: !Ref Domain
+  ApiRecord:
+    Condition: CreateDomain
+    Value: !GetAtt ApiDomainName.RegionalDomainName

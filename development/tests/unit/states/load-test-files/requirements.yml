@@ -1,0 +1,137 @@
+cloudsploitSettings:
+  settings1:
+    setting_value: 100
+    other_setting: true
+
+  default:
+    setting_value: 1000
+    other_setting: false
+
+severityWeightings:
+  critical: 10000
+  high: 1000
+  medium: 100
+  low: 10
+  info: 0
+
+severityColors:
+  critical:
+    background: "660066"
+    text: "FFFFFF"
+  high:
+    background: "FF0000"
+    text: "FFFFFF"
+  medium:
+    background: "FF8000"
+    text: "FFFFFF"
+  low:
+    background: "FFFF00"
+    text: "000000"
+  info:
+    background: "00F000"
+    text: "000000"
+  ok:
+    background: "00FF00"
+    text: "000000"
+
+version: version100
+
+exclusionTypes:
+  exception:
+    displayname: Exception
+    states:
+      initial: # only these 4 states are allowed
+        effective: false
+        displayName: Submitted
+        actionName: Submit exception
+      approved:
+        displayName: Approved
+        actionName: Approve
+      rejected:
+        displayName: Rejected
+        actionName: Reject
+      archived:
+        displayName: Archived
+        actionName: Archive
+    formFields:
+      reason:
+        label: Reason
+        placeholder: Enter reason for not complying with this requirement
+        showInNcrView: True
+    defaultDurationInDays: 365 # 1 year
+    maxDurationInDays: 1095 # 3 years
+
+database:
+  S3REQID01:
+    s3Import:
+      s3Bucket: s3-req-bucket-01
+      s3Key: req1
+    description: All IAM Users have MFA enabled for Console Access
+    source: s3Import
+    severity: high
+
+  S3REQID02:
+    s3Import:
+      s3Bucket: s3-req-bucket-01
+      s3Key: req1
+    description: All IAM Users have a strong password.
+    source: s3Import
+    severity: high
+
+  CS01:
+    cloudsploit:
+      finding: finding_name
+      source: ec2.describeImages
+      regional: true
+      treatWarnAsPass: true
+      treatFailAsPass: true
+    description: Do not create multiple accounts
+    source: cloudsploit
+    severity: info
+    onlyAppliesTo:
+      - sensitive-account
+
+  CS02:
+    cloudsploit:
+      finding: RDP OPEN
+      source: ec2.describeImages
+      regional: true
+      treatWarnAsPass: true
+      treatUnknownAsPass: true
+    description: Do not allow creation of IAM user
+    source: cloudsploit
+    severity: info
+    remediation:
+      remediationId: remediationId
+      info:
+        port: 3389
+
+  CS03:
+    cloudsploit:
+      finding: SSH OPEN
+      source: ec2.describeImages
+      regional: true
+      treatWarnAsPass: true
+      treatUnknownAsPass: true
+    description: Do not allow creation of IAM user
+    source: cloudsploit
+    severity: info
+    remediation:
+      remediationId: securityGroupIngress
+      requirementBasedParameters:
+        port: 22
+
+remediations:
+  securityGroupIngress:
+    lambdaFunctionName: ingressWorker
+    parameters:
+      cidrRange:
+        label: New CIDR range for ingress rule
+        placeholder: x.x.x.x/x
+      description:
+        label: New Description for ingress rule
+        placeholder: Description
+    requirementBasedParameters:
+      port:
+        description: port number to remediate
+        required: true

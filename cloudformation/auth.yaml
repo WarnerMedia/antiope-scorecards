@@ -1,0 +1,88 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Antiope Scorecards Authentication Resources
+
+
+Parameters:
+  Stage:
+    Type: String
+  ResourcePrefix:
+    Type: String
+    Description: The prefix for misc resource names
+    Default: antiope-scorecards
+  CallBackUrls:
+    Type: CommaDelimitedList
+    Description: List of urls for callback
+
+Resources:
+  Users:
+    Type: AWS::Cognito::UserPool
+    Properties:
+      UserPoolName: !Sub ${ResourcePrefix}-${Stage}-userpool
+      Policies:
+        PasswordPolicy:
+          MinimumLength: 8
+          RequireLowercase: True
+          RequireNumbers: True
+          RequireUppercase: True
+          TemporaryPasswordValidityDays: 7
+      Schema:
+        - Name: email
+          AttributeDataType: String
+          Mutable: True
+          Required: True
+      UsernameAttributes:
+        - email
+      AutoVerifiedAttributes:
+        - email
+      EmailConfiguration:
+        EmailSendingAccount: COGNITO_DEFAULT
+
+  Domain:
+    Type: AWS::Cognito::UserPoolDomain
+    Properties:
+      UserPoolId: !Ref Users
+      Domain: !Sub ${ResourcePrefix}-${Stage}
+
+  UserPoolClient:
+    Type: AWS::Cognito::UserPoolClient
+    Properties:
+      UserPoolId: !Ref Users
+      CallbackURLs: !Ref CallBackUrls
+      SupportedIdentityProviders:
+        - COGNITO
+
+  UserPoolIdSSM:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Type: String
+      Name: !Sub /${ResourcePrefix}/${Stage}/auth/user-pool-id
+      Value: !Ref Users
+
+  AppClientIdSSM:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Type: String
+      Name: !Sub /${ResourcePrefix}/${Stage}/auth/app-client-id
+      Value: !Ref UserPoolClient
+
+  DomainSSM:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Type: String
+      Name: !Sub /${ResourcePrefix}/${Stage}/auth/domain
+      Value: !Ref Domain
+
+
+Outputs:
+  UserPoolId:
+    Description: Cognito user pool id
+    Value: !Ref Users
+  UserPoolArn:
+    Description: Cognito user pool ARN
+    Value: !GetAtt Users.Arn
+  AppClientId:
+    Description: Cognito user pool app client id
+    Value: !Ref UserPoolClient
+  Domain:
+    Description: Cognito user pool domain
+    Value: !Ref Domain

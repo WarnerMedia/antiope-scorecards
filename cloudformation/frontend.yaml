@@ -1,0 +1,95 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Antiope Scorecards Frontend Hosting
+
+
+Parameters:
+  Stage:
+    Type: String
+    Description: The stage to deploy to
+  Domain:
+    Type: String
+    Description: Domain name to host application
+  ResourcePrefix:
+    Type: String
+    Description: The prefix for misc resource names
+    Default: antiope-scorecards
+
+
+Resources:
+  AmplifyRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: amplify.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: Amplify
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: amplify:*
+                Resource: '*'
+              - Effect: Allow
+                Action: ssm:GetParameter
+                Resource: '*'
+
+  AmplifyApp:
+    Type: AWS::Amplify::App
+    Properties:
+      IAMServiceRole: !GetAtt AmplifyRole.Arn
+      Name: !Sub ${ResourcePrefix}-frontend-${Stage}
+      CustomRules:
+        - Source: </^[^.]+$|\\.(?!(css|gif|ico|jpg|js|png|txt|svg|woff|ttf|webmanifest|woff2)$)([^.]+$)/>
+          Target: /
+          Status: '200'
+      EnvironmentVariables:
+        - Name: REACT_APP_API_URL
+          Value: !Sub https://api.${Domain}
+
+  AmplifyBranch:
+    Type: AWS::Amplify::Branch
+    Properties:
+      BranchName: main
+      AppId: !GetAtt AmplifyApp.AppId
+      EnableAutoBuild: true
+      Stage: PRODUCTION
+
+  AmplifyDomain:
+    Type: AWS::Amplify::Domain
+    Properties:
+      DomainName: !Ref Domain
+      AppId: !GetAtt AmplifyApp.AppId
+      SubDomainSettings:
+        - BranchName: !GetAtt AmplifyBranch.BranchName
+          Prefix: ''
+
+  AmplifyAppSSM:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Type: String
+      Name: !Sub /${ResourcePrefix}/${Stage}/frontend/app-id
+      Value: !GetAtt AmplifyApp.AppId
+
+  AmplifyBranchSSM:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Type: String
+      Name: !Sub /${ResourcePrefix}/${Stage}/frontend/branch
+      Value: !GetAtt AmplifyBranch.BranchName
+
+Outputs:
+  AmplifyCertDomain:
+    Value: !Select [0, !Split [' ', !GetAtt AmplifyDomain.CertificateRecord ] ]
+  AmplifyCertRecord:
+    Value: !Select [2, !Split [' ', !GetAtt AmplifyDomain.CertificateRecord ] ]
+  AmplifyAppId:
+    Value: !Ref AmplifyApp
+  AmplifyDomainName:
+    Value: !GetAtt AmplifyDomain.DomainName
+  AmplifyDefaultDomain:
+    Value: !GetAtt AmplifyApp.DefaultDomain

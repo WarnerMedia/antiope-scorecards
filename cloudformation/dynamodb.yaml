@@ -1,0 +1,219 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Antiope Scorecards Database Tables
+
+
+Parameters:
+  Stage:
+    Type: String
+    Description: Names the tables
+  ResourcePrefix:
+    Type: String
+    Description: The prefix for misc resource names
+    Default: antiope-scorecards
+
+# CloudFormation YAML !Sub and !Ref are not used to facilitate easy parsing of this file to build tables for tests.
+# This file is loaded by the create_tables fixture in tests/unit/conftest.py in order to create dynamodb tables in local
+# dynamodb that match production tables.
+# YAML with custom objects (e.g. !Sub, !Ref) are not able to be loaded out of the box by python's YAML parser.
+# Not using these custom objects is the least friction way to load the YAML
+
+Resources:
+  Users:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: {"Fn::Sub": "${ResourcePrefix}-${Stage}-users-table"}
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: email
+          AttributeType: S
+      KeySchema:
+        - AttributeName: email
+          KeyType: HASH
+
+  Config:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: {"Fn::Sub": "${ResourcePrefix}-${Stage}-config-table"}
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: configId
+          AttributeType: S
+      KeySchema:
+        - AttributeName: configId
+          KeyType: HASH
+
+  Accounts:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: {"Fn::Sub": "${ResourcePrefix}-${Stage}-accounts-table"}
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: accountId
+          AttributeType: S
+      KeySchema:
+        - AttributeName: accountId
+          KeyType: HASH
+
+  Requirements:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: {"Fn::Sub": "${ResourcePrefix}-${Stage}-requirements-table"}
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: requirementId
+          AttributeType: S
+      KeySchema:
+        - AttributeName: requirementId
+          KeyType: HASH
+
+  NonCompliantResources:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: {"Fn::Sub": "${ResourcePrefix}-${Stage}-nonCompliantResources-table"}
+      BillingMode: PAY_PER_REQUEST
+      TimeToLiveSpecification:
+        AttributeName: ttl
+        Enabled: true
+      AttributeDefinitions:
+        - AttributeName: scanId
+          AttributeType: S
+        - AttributeName: accntId_rsrceId_rqrmntId
+          AttributeType: S
+        - AttributeName: rqrmntId_accntId
+          AttributeType: S
+      KeySchema:
+        - AttributeName: scanId
+          KeyType: HASH
+        - AttributeName: accntId_rsrceId_rqrmntId
+          KeyType: RANGE
+      GlobalSecondaryIndexes:
+        - IndexName: by-scanId
+          KeySchema:
+            - AttributeName: scanId
+              KeyType: HASH
+            - AttributeName: rqrmntId_accntId
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+
+  Exclusions:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: {"Fn::Sub": "${ResourcePrefix}-${Stage}-exclusions-table"}
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: accountId
+          AttributeType: S
+        - AttributeName: rqrmntId_rsrceRegex
+          AttributeType: S
+      KeySchema:
+        - AttributeName: accountId
+          KeyType: HASH
+        - AttributeName: rqrmntId_rsrceRegex
+          KeyType: RANGE
+
+  Scores:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: {"Fn::Sub": "${ResourcePrefix}-${Stage}-scores-table"}
+      BillingMode: PAY_PER_REQUEST
+      TimeToLiveSpecification:
+        AttributeName: ttl
+        Enabled: true
+      AttributeDefinitions:
+        - AttributeName: scanId
+          AttributeType: S
+        - AttributeName: accntId_rqrmntId
+          AttributeType: S
+      KeySchema:
+        - AttributeName: scanId
+          KeyType: HASH
+        - AttributeName: accntId_rqrmntId
+          KeyType: RANGE
+
+  AccountScores:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: {"Fn::Sub": "${ResourcePrefix}-${Stage}-accountScores-table"}
+      BillingMode: PAY_PER_REQUEST
+      TimeToLiveSpecification:
+        AttributeName: ttl
+        Enabled: true
+      AttributeDefinitions:
+        - AttributeName: accountId
+          AttributeType: S
+        - AttributeName: date
+          AttributeType: S
+      KeySchema:
+        - AttributeName: accountId
+          KeyType: HASH
+        - AttributeName: date
+          KeyType: RANGE
+
+  Scans:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: {"Fn::Sub": "${ResourcePrefix}-${Stage}-scans-table"}
+      BillingMode: PAY_PER_REQUEST
+      TimeToLiveSpecification:
+        AttributeName: ttl
+        Enabled: true
+      AttributeDefinitions:
+        - AttributeName: scan
+          AttributeType: S
+        - AttributeName: scanId
+          AttributeType: S
+      KeySchema:
+        - AttributeName: scan
+          KeyType: HASH
+        - AttributeName: scanId
+          KeyType: RANGE
+
+  Audit:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: {"Fn::Sub": "${ResourcePrefix}-${Stage}-audit-table"}
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: year
+          AttributeType: S
+        - AttributeName: timestamp
+          AttributeType: S
+      KeySchema:
+        - AttributeName: year
+          KeyType: HASH
+        - AttributeName: timestamp
+          KeyType: RANGE
+
+
+Outputs:
+  UsersTableName:
+    Description: Users table name
+    Value: {Ref: Users}
+  ConfigTableName:
+    Description: Config table name
+    Value: {Ref: Config}
+  AccountsTableName:
+    Description: Accounts table name
+    Value: {Ref: Accounts}
+  RequirementsTableName:
+    Description: Requirements table name
+    Value: {Ref: Requirements}
+  NCRTableName:
+    Description: NonCompliantResources table name
+    Value: {Ref: NonCompliantResources}
+  ExclusionsTableName:
+    Description: Exclusions table name
+    Value: {Ref: Exclusions}
+  ScoresTableName:
+    Description: Scores table name
+    Value: {Ref: Scores}
+  AccountScoresTableName:
+    Description: AccountScores table name
+    Value: {Ref: AccountScores}
+  ScansTableName:
+    Description: Scans table name
+    Value: {Ref: Scans}
+  AuditTableName:
+    Description: Audit table name
+    Value: {Ref: Audit}
