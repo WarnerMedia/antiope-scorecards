@@ -173,6 +173,14 @@ Resources:
                 Effect: Allow
                 Resource: !Sub arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:*
 
+  GetScans:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub ${ResourcePrefix}-${Stage}-api-GetScans
+      Handler: api.scans.scans_handler
+      CodeUri: ../build
+      Role: !GetAtt LambdaRole.Arn
+
   GetDocumentation:
     Type: AWS::Serverless::Function
     Properties:
@@ -279,7 +287,8 @@ Resources:
                   [ "AWS/Lambda", "Invocations", "FunctionName", "${GetExclusions}", { "stat": "Sum", "period": 604800, "label": "GetExclusions"} ],
                   [ "AWS/Lambda", "Invocations", "FunctionName", "${PutExclusions}", { "stat": "Sum", "period": 604800, "label": "PutExclusions"} ],
                   [ "AWS/Lambda", "Invocations", "FunctionName", "${PutExclusionsForUser}", { "stat": "Sum", "period": 604800, "label": "PutExclusionsForUser"} ],
-                  [ "AWS/Lambda", "Invocations", "FunctionName", "${PostRemediate}", { "stat": "Sum", "period": 604800, "label": "PostRemediate"} ]
+                  [ "AWS/Lambda", "Invocations", "FunctionName", "${PostRemediate}", { "stat": "Sum", "period": 604800, "label": "PostRemediate"} ],
+                  [ "AWS/Lambda", "Invocations", "FunctionName", "${GetScans}", { "stat": "Sum", "period": 604800, "label": "GetScans"} ]
                 ],
                 "region": "${AWS::Region}",
                 "title": "Lambda Invocation",
@@ -304,7 +313,8 @@ Resources:
                   [ "AWS/Lambda", "Errors", "FunctionName", "${GetExclusions}", { "stat": "Sum", "period": 604800, "label": "GetExclusions"} ],
                   [ "AWS/Lambda", "Errors", "FunctionName", "${PutExclusions}", { "stat": "Sum", "period": 604800, "label": "PutExclusions"} ],
                   [ "AWS/Lambda", "Errors", "FunctionName", "${PutExclusionsForUser}", { "stat": "Sum", "period": 604800, "label": "PutExclusionsForUser"} ],
-                  [ "AWS/Lambda", "Errors", "FunctionName", "${PostRemediate}", { "stat": "Sum", "period": 604800, "label": "PostRemediate"} ]
+                  [ "AWS/Lambda", "Errors", "FunctionName", "${PostRemediate}", { "stat": "Sum", "period": 604800, "label": "PostRemediate"} ],
+                  [ "AWS/Lambda", "Errors", "FunctionName", "${GetScans}", { "stat": "Sum", "period": 604800, "label": "GetScans"} ]
                 ],
                 "region": "${AWS::Region}",
                 "title": "Lambda Errors",
@@ -329,7 +339,8 @@ Resources:
                   [ "AWS/Lambda", "Duration", "FunctionName", "${GetExclusions}", { "stat": "Average", "period": 604800, "label": "GetExclusions"} ],
                   [ "AWS/Lambda", "Duration", "FunctionName", "${PutExclusions}", { "stat": "Average", "period": 604800, "label": "PutExclusions"} ],
                   [ "AWS/Lambda", "Duration", "FunctionName", "${PutExclusionsForUser}", { "stat": "Average", "period": 604800, "label": "PutExclusionsForUser"} ],
-                  [ "AWS/Lambda", "Duration", "FunctionName", "${PostRemediate}", { "stat": "Average", "period": 604800, "label": "PostRemediate"} ]
+                  [ "AWS/Lambda", "Duration", "FunctionName", "${PostRemediate}", { "stat": "Average", "period": 604800, "label": "PostRemediate"} ],
+                  [ "AWS/Lambda", "Duration", "FunctionName", "${GetScans}", { "stat": "Average", "period": 604800, "label": "GetScans"} ]
                 ],
                 "region": "${AWS::Region}",
                 "title": "Lambda Duration",
@@ -380,6 +391,12 @@ Resources:
               Access-Control-Allow-Headers: "'*'"
               Access-Control-Allow-Origin: "'*'"
               Access-Control-Allow-Methods: "'*'"
+        WAF_FILTERED:
+          ResponseParameters:
+            Headers:
+              Access-Control-Allow-Headers: "'*'"
+              Access-Control-Allow-Origin: "'*'"
+              Access-Control-Allow-Methods: "'*'"
       EndpointConfiguration: REGIONAL
       Name: !Sub ${ResourcePrefix}-api-${Stage}
       DefinitionBody:
@@ -414,6 +431,27 @@ Resources:
                   $ref: '#/components/responses/notFound'
                 '500':
                   $ref: '#/components/responses/internalError'
+          /scans:
+            get:
+              operationId: getScans
+              description: return as many scans as possible starting from the newest.
+              security:
+                - CognitoAuth: [] # default authorization
+              x-amazon-apigateway-integration:
+                uri: !Sub arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${GetScans.Arn}/invocations
+                credentials: !GetAtt ApiServiceRole.Arn
+                responses: {}
+                httpMethod: POST
+                type: aws_proxy
+              responses:
+                '200':
+                  description: Successful response
+                  content:
+                    application/json:
+                      schema:
+                        $ref: '#/components/schemas/getScans'
+                '400':
+                  description: bad request
           /status:
             get:
               operationId: getUserStatus
@@ -692,6 +730,33 @@ Resources:
                   schema:
                     $ref: '#/components/schemas/error'
           schemas:
+            scanErrorObject:
+              type: object
+              properties:
+                functionName:
+                  type: string
+                error:
+                  type: object
+            getScans:
+              type: object
+              properties:
+                scans:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      scanId:
+                        type: string
+                      processState:
+                        type: string
+                      ttl:
+                        type: integer
+                      errors:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/scanErrorObject'
+                      fatalError:
+                        $ref: '#/components/schemas/scanErrorObject'
             documentation:
               type: string
             remediatePostRequestbody:

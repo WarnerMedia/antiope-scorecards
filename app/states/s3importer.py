@@ -57,6 +57,7 @@ def s3import_handler(event, context=None):
             logger.warning('Account %s found in import but not present in accounts table', account_id)
 
         for failing_resource in import_object['failingResources']:
+            failing_resource['requirementId'] = requirement_id  # overwrite reqId from import_object
             ncrs_to_put.append(
                 ncr_table.new_ncr_record(failing_resource, scan_id)
             )

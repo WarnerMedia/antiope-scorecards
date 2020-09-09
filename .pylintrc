@@ -153,7 +153,8 @@ disable=print-statement,
         too-few-public-methods,
         redefined-outer-name,
         too-many-public-methods,
-        too-many-instance-attributes
+        too-many-instance-attributes,
+        raise-missing-from
 
 # Enable the message, report, category or checker with the given id(s). You can
 # either give multiple identifier separated by comma (,) or put this option
@@ -584,7 +585,7 @@ max-public-methods=20
 max-returns=8
 
 # Maximum number of statements in function / method body.
-max-statements=50
+max-statements=75
 
 # Minimum number of public methods for a class (see R0903).
 min-public-methods=2
