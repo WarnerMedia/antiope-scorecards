@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import Paper from '@material-ui/core/Paper';
-import { getAccountsSummary } from "../../redux/middleware";
+import { getAccountsSummary, getStatus } from "../../redux/middleware";
 import { accountsFormatter } from './formatting'
 import { useDispatch, useSelector } from "react-redux";
 import dataSlice from "../../redux/reducers";
@@ -31,14 +31,13 @@ const Welcome = () => {
     const dispatch = useDispatch();
     const status = Cache.getItem("status");
     const [filtered, setFilter] = useState({});
-
     let rowData;
+
     function cellSelect(data) {
         rowData = data;
     }
 
     function rowSelect(column, row) {
-
         if (rowData && row) {
             let accountId = row.accountId;
             if (rowData.idx < 2) {
@@ -49,12 +48,15 @@ const Welcome = () => {
 
 	useEffect(() => {
         let accountIds = [];
+
+        dispatch(dataSlice.actions.setIndex(0));
+        dispatch(getStatus());
+
         const newStatus = Cache.getItem("status");
         if (newStatus.accountList) {
             accountIds = getIds(newStatus.accountList);
         }
         dispatch(getAccountsSummary(accountIds));
-        dispatch(dataSlice.actions.setIndex(0));
     }, [dispatch]);
 
     const runFilter = (filtered) => {

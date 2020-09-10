@@ -5,6 +5,7 @@ import AppBar from '@material-ui/core/AppBar';
 import Button from '@material-ui/core/Button';
 import Toolbar from '@material-ui/core/Toolbar';
 import Welcome from '../accounts/Accounts';
+import ScansView from '../scans/ScansView'
 import Matrix from '../matrix/Matrix';
 import dataSlice from "../../redux/reducers";
 import { useDispatch, useSelector } from "react-redux";
@@ -13,12 +14,13 @@ import Tab from '@material-ui/core/Tab';
 import Snackbar from '@material-ui/core/Snackbar';
 import dateFormat from 'dateformat';
 
+import Scans from '../scans/Scans';
 import NCR from '../ncr/NCR';
 import Denied from '../denied/Denied';
 
 import Exclusions from '../exclusions/Exclusions';
 import { makeStyles } from '@material-ui/core/styles';
-import Logo from '../../logo.png';
+import Logo from '../../warnermedia-fake.png';
 
 import stylesheet from '../styles'
 import { Auth, Cache } from 'aws-amplify';
@@ -49,6 +51,10 @@ export const Main = () => {
                     });
 
         if (status && status.isAuthenticated && data !== "No current user") {
+            if (route.location.pathname.includes("scans") &&
+                route.location.pathname.lastIndexOf("/") > route.location.pathname.search("scans")) {
+                return (<Route path="/scans/:scanId" component={ScansView}/>);
+            }
             switch(route.location.pathname) {
                 case "/accounts":
                     return (<Route path="/accounts" component={Welcome}/>)
@@ -58,6 +64,8 @@ export const Main = () => {
                     return (<Route path="/ncr" component={NCR}/>)
                 case "/exclusions":
                     return (<Route path="/exclusions" component={Exclusions}/>)
+                case "/scans":
+                    return (<Route path="/scans" component={Scans}/>)
                 default:
                     history.push("/accounts");
                     return (<Route path="/accounts" component={Welcome}/>)
@@ -88,6 +96,9 @@ export const Main = () => {
             case 3:
                 history.push("/exclusions");
                 break;
+            case 4:
+                history.push("/scans");
+                break;
             default:
                 history.push("/accounts");
 
@@ -96,10 +107,10 @@ export const Main = () => {
     }
 
     const logOut = () => {
+        dispatch(dataSlice.actions.logOut());
         Auth.signOut()
             .then(confirm => {
                 history.push("/login");
-                dispatch(dataSlice.actions.logOut());
             })
             .catch(err => {
                 console.log(err);
@@ -123,6 +134,7 @@ export const Main = () => {
                             <Tab className={classes.tab} label="NCRs" {...a11yProps(2)} />
 
                             {status && status.isAdmin && <Tab className={classes.tab} label="Exclusions" {...a11yProps(3)} />}
+                            {status && status.isAdmin && <Tab className={classes.tab} label="scans" {...a11yProps(4)} />}
                         </Tabs>
                         <div className={classes.spacer}></div>
                         <Button color="secondary" onClick={logOut}>Log Out</Button>

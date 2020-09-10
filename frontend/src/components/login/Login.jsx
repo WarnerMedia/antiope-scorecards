@@ -25,8 +25,8 @@ Amplify.configure({
       oauth: {
         domain: `${process.env.REACT_APP_COGNITO_DOMAIN}`,
         scope: ['openid', 'email'],
-        redirectSignIn: 'https://main.d1foxq0r8vu8zn.amplifyapp.com/callback',
-        redirectSignOut: 'https://main.d1foxq0r8vu8zn.amplifyapp.com/login',
+        redirectSignIn: `https://${window.location.hostname}/callback`,
+        redirectSignOut: `https://${window.location.hostname}/login`,
         responseType: 'token'
       }
     },
@@ -50,6 +50,7 @@ export const Login = () => {
             Auth.currentSession()
             .then(data => {
                 if (data) {
+                    setLoading(true);
                     dispatch(getStatus());
                 }
             })
@@ -350,14 +351,15 @@ export const Login = () => {
                             </CardContent>
                         <CardContent/>
                         <CardActions>
-                            <Button onClick={handleOktaLogin} variant="contained" size="small" color="secondary">
-                            Okta
-                            </Button>
+                            <div className={classes.wrapper}>
+                                <Button onClick={handleOktaLogin} variant="contained" size="small" color="secondary">
+                                Okta
+                                </Button>
+                            </div>
                             <div className={classes.wrapper}>
                                 <Button onClick={handleLogin} size="small" color="primary">
                                 Login
                                 </Button>
-                                {loading && <CircularProgress size={20} className={classes.buttonProgress} />}
                             </div>
                             <div className={classes.wrapper}>
                                 <Button onClick={handleForgotPass} size="small" color="primary">
@@ -365,6 +367,8 @@ export const Login = () => {
                                 </Button>
                             </div>
                         </CardActions>
+                        {loading && <CircularProgress size={80} className={classes.loginProgress} />}
+
                         </Card>
                     </Grid>
                 </Grid>

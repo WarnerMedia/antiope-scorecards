@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import Paper from '@material-ui/core/Paper';
-import { getAccountsScore } from "../../redux/middleware";
+import { getAccountsScore, getStatus } from "../../redux/middleware";
 import { matrixFormatter } from './formatting'
 import { useDispatch, useSelector } from "react-redux";
 import FilterBar from "../filter/FilterBar";
@@ -55,7 +55,6 @@ const Matrix = () => {
     const [filtered, setFilter] = useState({});
     const status = Cache.getItem("status");
 
-
     let showPaginator = false;
     let data = useSelector(state => state.data.accounts);
     let dataLength = 0;
@@ -67,18 +66,6 @@ const Matrix = () => {
     } else {
         showPayerDropdown = false;
     }
-
-    // if (data && data.length > 100) {
-    //     showPaginator = true;
-    //     showFilterBar = true;
-
-    //     dataLength = data.length;
-    //     if (page === 0) {
-    //         data = getPaginatedData({lesser: 0, greater: 100}, data);
-    //     } else {
-    //         data = getPaginatedData({lesser: (page * 100), greater: ((page + 1) * 100)}, data);
-    //     }
-    // }
 
     const changePaginatedData = (newPage) => {
         setPage(newPage);
@@ -105,6 +92,7 @@ const Matrix = () => {
 
 	useEffect(() => {
         dispatch(dataSlice.actions.setIndex(1));
+        dispatch(getStatus());
         let accountIds = [];
         const newStatus = Cache.getItem("status");
         if (newStatus.accountList) {

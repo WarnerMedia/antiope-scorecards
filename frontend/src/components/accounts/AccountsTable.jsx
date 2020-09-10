@@ -40,7 +40,7 @@ function getRows(rows, filters) {
     return selectors.getRows({ rows, filters });
 }
 
-const Table = () => {
+const Table = ({rowSelect, cellSelect}) => {
     const [filters, setFilters] = useState({});
     const dispatch = useDispatch();
     let data = useSelector(state => state.data.accountsFormatted);
@@ -53,6 +53,8 @@ const Table = () => {
                 rowGetter={i => filteredRows[i]}
                 rowsCount={filteredRows.length}
                 toolbar={<Toolbar enableFilter={true} />}
+                onCellSelected={cellSelect}
+                onRowClick={rowSelect}
                 onAddFilter={filter => setFilters(handleFilterChange(filter))}
                 onClearFilters={() => setFilters({})}
                 getValidFilterValues={columnKey => getValidFilterValues(data.rows, columnKey)}

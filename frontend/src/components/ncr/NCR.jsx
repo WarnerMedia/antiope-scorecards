@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import Paper from '@material-ui/core/Paper';
-import { getNCRs, putExclusionsUser, postRemediation } from "../../redux/middleware";
+import { getNCRs, putExclusionsUser, postRemediation, getStatus } from "../../redux/middleware";
 import { ncrFormatter } from './formatting'
 import { useDispatch, useSelector } from "react-redux";
 import { unwrapResult } from '@reduxjs/toolkit';
@@ -37,6 +37,8 @@ const NCR = (props) => {
 
     useEffect(() => {
         dispatch(dataSlice.actions.setIndex(2));
+        dispatch(getStatus());
+
         const newStatus = Cache.getItem("status");
         if (!props.location.search || props.location.search === "") {
             dispatch(getNCRs({ accountId: getAllIds(newStatus.accountList) }));

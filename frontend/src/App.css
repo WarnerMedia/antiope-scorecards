@@ -1,5 +1,10 @@
 .root {
   display: flex;
+  height: 100%;
+}
+
+#root {
+  height: 100%;
 }
 
 .test-cell {
@@ -25,7 +30,7 @@
 .App {
   background-color: #f5f5f5;
   display: flex;
-  min-height: -webkit-fill-available;
+  height: 100%;
   flex-grow: 1;
 }
 
