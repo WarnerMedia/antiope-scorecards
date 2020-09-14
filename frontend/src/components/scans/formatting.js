@@ -32,7 +32,7 @@ const formatDate = (date) => {
         return strToPad;
     }
     let year = String(date.getFullYear());
-    let month = pad(String(date.getMonth()));
+    let month = pad(String(date.getMonth() + 1));
     let day = pad(String(date.getDate()));
 
     let hours = pad(String(date.getHours()));
