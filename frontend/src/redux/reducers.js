@@ -1,5 +1,5 @@
 import { createSlice } from '@reduxjs/toolkit'
-import { getAccountsSummary, getExclusions, getStatus, getNCRs, getAccountsScore, getNCRTags } from "./middleware";
+import { getAccountsSummary, getExclusions, getStatus, getNCRs, getAccountsScore, getNCRTags, getScans } from "./middleware";
 import { Cache } from 'aws-amplify';
 
 
@@ -14,7 +14,9 @@ const dataSlice = createSlice({
                 ncrFormatted: {},
                 exclusionsFormatted: {},
                 accountsFormatted: {},
+                scansFormatted: {},
                 tags: [],
+                currentScan: {},
                 index: 0},
     reducers: {
         open: (state, action) => { state.modalOpen = {isOpen: true, formData: action.payload} },
@@ -26,6 +28,7 @@ const dataSlice = createSlice({
         },
         setMatrix: (state, action) => { state.matrixFormatted = action.payload},
         setNCR: (state, action) => { state.ncrFormatted = action.payload},
+        setScans: (state, action) => { state.scansFormatted = action.payload},
         setExclusions: (state, action) => { state.exclusionsFormatted = action.payload},
         setAccounts: (state, action) => { state.accountsFormatted = action.payload},
         clearState: (state) => {
@@ -36,6 +39,7 @@ const dataSlice = createSlice({
             state.summary = null;
             state.exclusions = null;
             state.ncrRecords = null;
+            state.scansRecords = null;
             state.accounts = null;
         },
         logOut: (state) => {
@@ -61,6 +65,11 @@ const dataSlice = createSlice({
         [getNCRs.fulfilled]: (state, action) => {
             if (action.payload && action.payload.ncrRecords) {
                 state.ncrRecords = action.payload.ncrRecords;
+            }
+        },
+        [getScans.fulfilled]: (state, action) => {
+            if (action.payload && action.payload.scans) {
+                state.scansRecords = action.payload.scans;
             }
         },
         [getNCRTags.fulfilled]: (state, action) => {

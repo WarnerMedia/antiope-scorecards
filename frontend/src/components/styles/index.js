@@ -110,6 +110,14 @@ const styles =
         marginTop: -12,
         marginLeft: -12,
       },
+      loginProgress: {
+        color: '#eeeee',
+        position: 'absolute',
+        top: '48%',
+        left: '47%',
+        marginTop: -12,
+        marginLeft: -12,
+      },
       tabs: {
         height: '63px',
         marginLeft: '3rem'
@@ -121,6 +129,15 @@ const styles =
         height: '25px',
         fontSize: '0.25rem',
         lineHeight: '0.5'
+      },
+      tableButtonLargeFont: {
+        height: '25px',
+        fontSize: '0.7rem',
+        lineHeight: '0.5'
+      },
+      scanView: {
+        'overflow-y': 'scroll',
+        height: '100%'
       },
       fab: {
         right: '16px',

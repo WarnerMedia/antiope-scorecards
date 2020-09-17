@@ -6,6 +6,28 @@ import querystring from 'querystring';
 
 const ACCOUNT_CHUNK_SIZE = 50;
 
+const getScans = createAsyncThunk(
+    'data/getScans',
+    async (id, thunkAPI) => {
+            try {
+                const auth = await Auth.currentSession();
+                const config = {
+                    headers: {
+                        'Authorization': auth.idToken.jwtToken,
+                    }
+                };
+
+                const d = await axios.get(`${process.env.REACT_APP_API_URL}/scans`, config);
+                return d.data;
+
+            } catch(error) {
+                return error.response.data;
+
+            }
+
+    }
+)
+
 const getStatus = createAsyncThunk(
     'data/getStatus',
     async (id, thunkAPI) => {
@@ -244,5 +266,6 @@ export {
     getNCRTags,
     postRemediation,
     putExclusions,
-    putExclusionsUser
+    putExclusionsUser,
+    getScans
 };

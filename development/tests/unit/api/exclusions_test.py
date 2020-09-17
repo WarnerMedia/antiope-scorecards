@@ -6,8 +6,8 @@ import pytest
 from lib.dynamodb import user_table, exclusions_table, audit_table, requirements_table, scans_table, ncr_table, config_table
 from lib.exclusions import exclusions as exclusions_lib
 from lib.lambda_decorator import exceptions
-from tests.unit.api.test_setup_resources import sample_records
 from api import exclusions
+from tests.unit.api.test_setup_resources import sample_records
 
 
 EVENT = {

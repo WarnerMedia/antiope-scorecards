@@ -8,15 +8,17 @@ logger = logging.getLogger('scorecards')
 
 logger.setLevel(os.getenv('LOG_LEVEL', 'DEBUG'))
 
-if not os.environ.get('AWS_EXECUTION_ENV'):
+in_lambda = os.environ.get('AWS_EXECUTION_ENV', '').startswith('AWS_Lambda')
+
+if not in_lambda:
     root_handler = logging.StreamHandler()
     root_handler.setFormatter(logging.Formatter('%(message)s'))
     root_logger.addHandler(root_handler)
 
 
 def update_log_format(format_string):
-    prefix = '%(aws_request_id)s ' if os.environ.get('AWS_EXECUTION_ENV') else ''
-    suffix = '\n' if os.environ.get('AWS_EXECUTION_ENV') else ''
+    prefix = '%(aws_request_id)s ' if in_lambda else ''
+    suffix = '\n' if in_lambda else ''
     for handler in root_logger.handlers:
         handler.setFormatter(logging.Formatter(prefix + format_string + suffix))
 

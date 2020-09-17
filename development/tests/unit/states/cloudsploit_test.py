@@ -100,6 +100,8 @@ class TestCloudSploitPopulate:
             'description': 'sample text',
             'source': 'cloudsploit',
             'severity': 'medium',
+            'service': 'organizations',
+            'component': 'account',
             'cloudsploit': {
                 'finding': [
                     'Plugin Name One',
@@ -127,7 +129,7 @@ class TestCloudSploitPopulate:
                 'cloudsploitStatus': 'FAIL',
                 'requirementId': '10',
                 'resourceId': 'aaa-aaa-aaa-aaa',
-                'resourceType': 'S3',
+                'resourceType': 'organizations-account',
                 'region': 'global',
                 'reason': 'sample text\nsample text2',
             }, scan_id)
@@ -191,6 +193,8 @@ class TestCloudSploitPopulate:
             'description': 'sample text',
             'source': 'cloudsploit',
             'severity': 'medium',
+            'service': 'organizations',
+            'component': 'account',
             'cloudsploit': {
                 'finding': 'Plugin Name One',
                 'source': 'ec2.describeInstances',
@@ -216,7 +220,7 @@ class TestCloudSploitPopulate:
                 'cloudsploitStatus': 'FAIL',
                 'requirementId': '10',
                 'resourceId': 'aaa-aaa-aaa-aaa',
-                'resourceType': 'S3',
+                'resourceType': 'organizations-account',
                 'region': 'global',
                 'reason': 'sample text',
             }, scan_id)
@@ -324,7 +328,8 @@ class TestCloudSploitSetup():
         }
 
         desired_output = {
-            'aws': {'roleArn': 'arn:aaa'},
+            'cloud': 'aws',
+            'cloudConfig': {'roleArn': 'arn:aaa'},
             'settings': {
                 'key_1': 'value_1'
             },
@@ -342,7 +347,8 @@ class TestCloudSploitSetup():
             'cross_account_role': 'arn:aaa',
         }
         expected_result = {
-            'aws': {'roleArn': 'arn:aaa'},
+            'cloud': 'aws',
+            'cloudConfig': {'roleArn': 'arn:aaa'},
             'settings': {
                 'key1': 'value1'
             },

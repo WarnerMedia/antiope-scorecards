@@ -160,7 +160,7 @@ def get_accounts(payload: dict) -> Tuple[List, str, SheetTypes]:
         return accounts, prefix, SheetTypes.SINGLE_ACCOUNT
     elif 'payerId' in payload:
         prefix = '{}/by-payer/{}.xlsx'.format(PREFIX, payload['payerId'])
-        accounts = [a for a in get_all_accounts().values() if a['payer_id'] == payload['payerId']]
+        accounts = [a for a in get_all_accounts().values() if a.get('payer_id') == payload['payerId']]
         return accounts, prefix, SheetTypes.PAYER_ACCOUNT
     elif 'userEmail' in payload:
         prefix = '{}/by-user/{}.xlsx'.format(PREFIX, payload['userEmail'])
@@ -442,7 +442,7 @@ def decimal_to_num(obj):
 
 @states_decorator
 def gen_spreadsheets_error_handler(event, context):
-    scans_table.add_error(event['scanId'], context.function_name, event['error'])
+    scans_table.add_error(event['openScan']['scanId'], context.function_name, event['error'])
 
 @states_decorator
 def setup_user_spreadsheets_handler(event, context):

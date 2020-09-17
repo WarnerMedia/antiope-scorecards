@@ -38,6 +38,25 @@ ACCOUNTS_DATA = [{
     'payer_name': 'sampletextmaster',
 }]
 
+ACCOUNTS_WITHOUT_PAYERS_DATA = [{
+    'accountId': '111111111111',
+    'account_name': 'Sample text',
+    'account_status': 'ACTIVE',
+    'assume_role_link': 'No Cross Account Role',
+    'exec_sponsor': 'sampletext@gmail.com',
+    'exec_sponsor_email': 'sampletext@gmail.com',
+    'payer_name': 'sampletextmaster',
+}, {
+    'accountId': '999999999999',
+    'account_name': 'Sample text',
+    'account_status': 'ACTIVE',
+    'assume_role_link': 'No Cross Account Role',
+    'exec_sponsor': 'sampletext@gmail.com',
+    'exec_sponsor_email': 'sampletext@gmail.com',
+    'payer_id': '888',  # NOTE that this references an account not listed within this list of accounts.
+    'payer_name': 'sampletextmaster',
+}]
+
 ADMIN_USER = {
     'isAdmin': True,
     'email': 'admin2@gmail.com',
@@ -97,7 +116,7 @@ SCAN_DATA = [
     {
         'scan': ScansTable.SCAN,
         'scanId': '2020-04-01T17:32:28Zreoauaoeurgo',
-        'staus': ScansTable.IN_PROGRESS,
+        'status': ScansTable.IN_PROGRESS,
         'iteratorErrors': 'None',
         'errors': 'None',
     },

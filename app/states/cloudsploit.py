@@ -80,14 +80,18 @@ def cloudsploit_populate(event, context):
         # create NCR for each cloudsploit result
         for finding_object in relevant_results:
             if finding_object['status'] in failing_statuses:
-
+                resource_type = None
                 # set resource if cloudsploit didn't provide one
                 if finding_object['resource'] == ncr_table.CLOUDSPLOIT_FINDING_NA and requirement['cloudsploit'].get('regional', False) is True:
                     resource_id = finding_object['region']
                 elif finding_object['resource'] == ncr_table.CLOUDSPLOIT_FINDING_NA:
                     resource_id = str(account_id)
                 else:
-                    resource_id = extract_resource_id(finding_object['resource'])
+                    (resource_type, resource_id) = extract_resource_id(finding_object['resource'])
+
+                # Set the resource type based on the requirement spec (not cloudsploit), if it wasn't overridden by extract_resource_id()
+                if resource_type is None:
+                    resource_type = f'{requirement["service"]}-{requirement["component"]}'
 
                 ncr_key = ncr_table.create_sort_key(account_id, resource_id, requirement['requirementId'])
                 if ncr_key in all_ncrs:
@@ -99,7 +103,7 @@ def cloudsploit_populate(event, context):
                             'accountName': account['account_name'],
                             'requirementId': requirement['requirementId'],
                             'resourceId': resource_id,
-                            'resourceType': finding_object['category'],
+                            'resourceType': resource_type,
                             'region': finding_object['region'],
                             'reason': {finding_object['message']: None}, # dict as set with 1 item (set to deduplicate reasons)
                             'cloudsploitStatus': finding_object['status'] # Send the cloudsploit status to the NCR Record
@@ -159,7 +163,8 @@ def cloudsploit_setup(event, context):
     else:
         settings = event['cloudsploitSettingsMap']['default']
     return {
-        'aws': {
+        'cloud': 'aws',
+        'cloudConfig': {
             'roleArn': cross_account_role
         },
         'settings': settings,
@@ -248,6 +253,9 @@ def extract_resource_id(arn):
     # Additionally, Cloudsploit extended the ARN format for access keys.
     # an IAM user could be: arn:aws:iam::ACCOUNTID:user/USERNAME
     #                   or: arn:aws:iam::ACCOUNTID:user/USERNAME:access_key_X
+
+    resource_type = None # only a special case we override this
+
     arn_parts = arn.split(':')
     if len(arn_parts) == 6:
         # Arn is either arn:partition:service:region:account-id:resource-id
@@ -261,10 +269,11 @@ def extract_resource_id(arn):
         #            or arn:partition:service:region:account-id:user/USERNAME:access_key_X
         if arn_parts[2] == 'iam':
             username = arn_parts[5].split('/', 1)[1]  # extract off the resource-type and discard
-            resource_id = f'{username}-({arn_parts[6]})' # Make the resource_id "username-(access_key_X)"
+            resource_id = username
+            resource_type = arn_parts[6]  # ie access_key_X
         else:
             resource_id = arn_parts[6]
     else:
         # Well crap, this is unexpected
         resource_id = arn
-    return resource_id
+    return (resource_type, resource_id)

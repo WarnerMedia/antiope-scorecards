@@ -47,7 +47,7 @@ def list_all_users(all_accounts):
 
 def create_account_list(accounts):
     """
-    :param accountss: full contents of accounts table
+    :param accounts: full contents of accounts table
     :return: list composed of all accounts (just accountId) in accounts table
     """
     logger.debug('Creating account list')
@@ -71,18 +71,26 @@ def get_payer_accounts(accounts):
     :return: list of payer objects representing each unique payer id in accounts table
     """
     logger.debug('Getting payer accounts')
-    unique_payer_ids = {account['payer_id'] for account in accounts.values()}
-    return [make_payer_object(payer_id, accounts) for payer_id in unique_payer_ids]
+    unique_payer_ids = {account.get('payer_id', '') for account in accounts.values()}
+    return [make_payer_object(payer_id, accounts) for payer_id in unique_payer_ids if payer_id]
 
 
 def make_payer_object(payer_id, all_accounts):
-    accounts = [account for account in all_accounts.values() if account['payer_id'] == payer_id]
-    payer_account = all_accounts[payer_id]
-    return {
-        'id': payer_id,
-        'accountName': payer_account.get('account_name', ''),
-        'accountList': [{'accountId': account['accountId'], 'accountName': account['account_name']} for account in accounts]
-    }
+    to_return = {}
+    accounts = [account for account in all_accounts.values() if account.get('payer_id') == payer_id]
+    payer_account = all_accounts.get(payer_id, None)
+
+    to_return['id'] = payer_id
+    if payer_account:
+        to_return['accountName'] = payer_account.get('account_name', '')
+    else:
+        to_return['accountName'] = 'not available'
+    to_return['accountList'] = [
+        {'accountId': account['accountId'], 'accountName': account['account_name']}
+        for account in accounts
+    ]
+
+    return to_return
 
 
 @api_decorator

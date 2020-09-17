@@ -32,9 +32,9 @@ def load_handler(event, context):
     requirements = load_requirements()
 
     return {
-        'accountIds': [a['accountId'] for a in accounts],
-        'payerIds': list({a['payer_id'] for a in accounts}),
-        's3RequirementIds': [r_id for r_id, r in requirements['requirements'].items() if r.get('source') == 's3Import'],
+        'accountIds': list({a['accountId'] for a in accounts}),
+        'payerIds': list({a.get('payer_id') for a in accounts if a.get('payer_id')}),
+        's3RequirementIds': list({r_id for r_id, r in requirements['requirements'].items() if r.get('source') == 's3Import'}),
         'cloudsploitSettingsMap': requirements['cloudsploitSettingsMap']
     }
 
@@ -84,7 +84,10 @@ def load_user():
     s3_response = client_s3.get_object(Bucket=user_bucket, Key=os.getenv('USER_FILE_PATH'))
     user_list_from_s3 = json.loads(s3_response['Body'].read())
 
-    users_from_s3 = {user['email']: user for user in user_list_from_s3}
+    users_from_s3 = {}
+    for user in user_list_from_s3:
+        user['email'] = user['email'].lower()
+        users_from_s3[user['email']] = user
 
     ddb_data = user_table.scan_all()
     users_from_ddb = {user['email']: user for user in ddb_data}

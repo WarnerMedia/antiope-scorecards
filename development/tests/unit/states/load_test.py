@@ -18,6 +18,7 @@ class TestDocumentationHandler:
         loaded_accounts = [
             {'account_id': '111111111111', 'payer_id': '555555121212', 'cross_account_role': 'somearn'},
             {'account_id': '222222222222', 'payer_id': '555555121212'},
+            {'account_id': '333333333333'}
         ]
 
         s3_stubber.add_response(
@@ -48,7 +49,7 @@ class TestDocumentationHandler:
         result_from_load_handler = load.load_handler({}, {})
 
         expected_results = {
-            'accountIds': ['111111111111', '222222222222'],
+            'accountIds': ['111111111111', '222222222222', '333333333333'],
             'payerIds': ['555555121212'],
             's3RequirementIds': ['S3REQID01', 'S3REQID02'],
             'cloudsploitSettingsMap': {
@@ -56,7 +57,11 @@ class TestDocumentationHandler:
                 'default': {'setting_value': 1000, 'other_setting': False}
             }
         }
+        result_from_load_handler['accountIds'] = sorted(result_from_load_handler['accountIds'])
+        expected_results['accountIds'] = sorted(expected_results['accountIds'])
 
+        result_from_load_handler['s3RequirementIds'] = sorted(result_from_load_handler['s3RequirementIds'])
+        expected_results['s3RequirementIds'] = sorted(expected_results['s3RequirementIds'])
         assert result_from_load_handler == expected_results
 
     def test_load_accounts_add_delete(self, s3_stubber):
@@ -65,7 +70,8 @@ class TestDocumentationHandler:
         initial_accounts = [
             {'account_id': '111111111111', 'payer_id': '555555121212'},
             {'account_id': '222222222222', 'payer_id': '555555121212'},
-            {'account_id': '333333333333', 'payer_id': '555555121212'}
+            {'account_id': '333333333333', 'payer_id': '555555121212'},
+            {'account_id': '555555555555'}
         ]
         s3_stubber.add_response(
             'get_object',
@@ -87,6 +93,7 @@ class TestDocumentationHandler:
             {'account_id': '222222222222', 'payer_id': '555555121212'}, # stays same
             # delete account 333333333333
             {'account_id': '444444444444', 'payer_id': '555555121212'}, # new
+            {'account_id': '555555555555', 'payer_id': '555555121212'},  # modify
         ]
 
         s3_stubber.add_response(
@@ -127,6 +134,50 @@ class TestDocumentationHandler:
             users_in_db.remove(user)
 
         assert load_user_response == initial_users
+
+        non_admins_remaining = [user for user in users_in_db if user.get('Admin', False)]
+        assert non_admins_remaining == []
+
+        # test removing users from db
+        updated_users = []
+        s3_stubber.add_response('get_object', {'Body': StringIO(json.dumps(updated_users))})
+
+        load.load_user()
+
+        # confirm users are removed from db
+        users_in_db = user_table.scan_all()
+        for user in initial_users:
+            assert user not in users_in_db
+
+        s3_stubber.assert_no_pending_responses()
+
+    def test_load_user_add_delete_camel_case(self, s3_stubber):
+        """Tests for syncing users with those present in S3 in which S3 data contains camelCase emails"""
+        # create initial users
+        initial_users = [
+            {'email': 'userOne@example.com', 'attribute': 'value'},
+            {'email': 'userTwo@example.com', 'otherAttribute': 'value'},
+        ]
+        initial_users_downcase = [
+            {'email': 'userone@example.com', 'attribute': 'value'},
+            {'email': 'usertwo@example.com', 'otherAttribute': 'value'},
+        ]
+        s3_stubber.add_response(
+            'get_object',
+            {'Body': StringIO(json.dumps(initial_users))},
+            {'Bucket': os.environ.get('USER_BUCKET'), 'Key': os.environ.get('USER_FILE_PATH')}
+        )
+
+        load_user_response = load.load_user()
+
+        # confirm users we expect to be added exist in db
+        users_in_db = user_table.scan_all()
+        for user in initial_users_downcase:
+            assert user in users_in_db
+            # remove users we know about from db results, for next check
+            users_in_db.remove(user)
+
+        assert load_user_response == initial_users_downcase
 
         non_admins_remaining = [user for user in users_in_db if user.get('Admin', False)]
         assert non_admins_remaining == []

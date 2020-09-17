@@ -112,6 +112,19 @@ for is_hidden, exclusion_applied, expiration_date, requirement_id in itertools.p
 
 
 class TestGenSpreadsheets():
+    def test_get_single_account_by_id_no_payer(self):
+        self.populate_accounts_no_payer()
+
+        event = {'accountId': '123123123132'}
+        accounts, bucket_prefix, scan_type = genspreadsheets.get_accounts(event)
+
+        assert accounts == [{
+            'accountId': '123123123132',
+            'account_id': '123123123132'
+        }]
+        assert bucket_prefix == '{}/by-account/123123123132.xlsx'.format(genspreadsheets.PREFIX)
+        assert scan_type == genspreadsheets.SheetTypes.SINGLE_ACCOUNT
+
     def test_base_workbook(self):
         self.populate_severity()
         workbook = genspreadsheets.create_base_workbook(
@@ -188,6 +201,32 @@ class TestGenSpreadsheets():
         assert len(accounts) >= 5
         assert bucket_prefix == '{}/global/scorecard-latest.xlsx'.format(genspreadsheets.PREFIX)
         assert scan_type == genspreadsheets.SheetTypes.GLOBAL
+
+    def populate_accounts_no_payer(self):
+        genspreadsheets.CACHE.clear()
+        accounts = [
+            {
+                'accountId': '123123123132',
+                'account_id': '123123123132'
+            },
+            {
+                'accountId': '345345345345',
+                'account_id': '345345345345'
+            },
+            {
+                'accountId': '456456456465',
+                'account_id': '456456456465'
+            },
+            {
+                'accountId': '567567567567',
+                'account_id': '567567567567'
+            },
+            {
+                'accountId': '678678676867',
+                'account_id': '678678676867'
+            }
+        ]
+        accounts_table.batch_put_records(accounts)
 
     def populate_accounts(self):
         genspreadsheets.CACHE.clear()
@@ -302,7 +341,9 @@ class TestGenSpreadsheets():
 
         genspreadsheets.gen_spreadsheets_error_handler(
             {
-                'scanId': scan_id,
+                'openScan': {
+                    'scanId': scan_id,
+                },
                 'error': 'error'
             },
             context

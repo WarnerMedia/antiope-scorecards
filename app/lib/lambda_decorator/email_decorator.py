@@ -9,7 +9,7 @@ def email_decorator(func):
     def wrapper_decorator(event, context):
         email = event.get('requestContext', {}).get('authorizer', {}).get('claims', {}).get('email')
         if email:
-            event['userRecord'] = user_table.get_user(email) or {}
+            event['userRecord'] = user_table.get_user(email.lower()) or {}
         else:
             raise exceptions.HttpInvalidException('bad request')
         return func(event, context)

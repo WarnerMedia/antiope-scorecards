@@ -3,6 +3,7 @@ phases:
   install:
     runtime-versions:
       python: 3.8
+      java: corretto8  # this is needed because local dynamodb requires classes present within this runtime in order to run
     commands:
       - echo "Installing dependencies"
   build:
